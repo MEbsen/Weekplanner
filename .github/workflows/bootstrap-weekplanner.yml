@@ -1,0 +1,32 @@
+name: Bootstrap Week Planner source
+
+on:
+  push:
+    paths:
+      - "_bootstrap/part4.b64"
+
+permissions:
+  contents: write
+
+jobs:
+  unpack:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Rebuild source archive
+        run: |
+          cat _bootstrap/part1.b64 _bootstrap/part2.b64 _bootstrap/part3.b64 _bootstrap/part4.b64 | base64 -d > /tmp/weekplanner.zip
+          unzip -o /tmp/weekplanner.zip -d /tmp/weekplanner
+          cp -a /tmp/weekplanner/. .
+          rm -rf _bootstrap
+          rm -f .github/workflows/bootstrap-weekplanner.yml
+      - name: Commit Week Planner 0.5.0
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add Week Planner 0.5.0"
+          git push
