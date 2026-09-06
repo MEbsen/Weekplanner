@@ -2,9 +2,11 @@
   "domain": "week_planner",
   "name": "Week Planner",
   "version": "0.5.0",
-  "documentation": "https://github.com/your-github-user/ha-week-planner",
-  "issue_tracker": "https://github.com/your-github-user/ha-week-planner/issues",
-  "codeowners": [],
+  "documentation": "https://github.com/MEbsen/Weekplanner",
+  "issue_tracker": "https://github.com/MEbsen/Weekplanner/issues",
+  "codeowners": [
+    "@MEbsen"
+  ],
   "config_flow": true,
   "dependencies": [
     "frontend",
