@@ -35,17 +35,20 @@ class WeekPlannerPanel extends HTMLElement {
     this._sessionVisibility = { weather:true, sun:true, energy:true };
     this._initialScrolled = false;
     this._scrollPositioned = false;
-    this._scrollRequestId++;
+    this._scrollRequestId = 0;
     this._savedScrollTop = null;
     this._savedScrollLeft = 0;
     this._lastFollowNowHourKey = "";
-    this._scrollPositioned = false;
-    this._scrollRequestId = 0;
-    this._programmaticScroll = false;
+    this._scrollState = "auto";
+    this._programmaticScrollUntil = 0;
     this._settingsOpen = false;
     this._renderPendingWhileSettingsOpen = false;
     this._serverTimeOffsetMs = 0;
     this._viewportHandler = () => this._applyViewportHeight();
+    this._focusHandler = () => this._resumeAutoScroll("window-focus");
+    this._visibilityHandler = () => {
+      if (!document.hidden) this._resumeAutoScroll("visibility-focus");
+    };
   }
 
   set hass(value) {
@@ -59,17 +62,28 @@ class WeekPlannerPanel extends HTMLElement {
 
   connectedCallback() {
     window.addEventListener("resize", this._viewportHandler);
+    window.addEventListener("focus", this._focusHandler);
+    document.addEventListener("visibilitychange", this._visibilityHandler);
+
+    // Returning to the panel/view is a new focus event by design:
+    // discard a previous manual override and re-evaluate the day focus.
+    this._scrollState = "auto";
+    this._scrollPositioned = false;
+    this._scrollRequestId++;
+    this._savedScrollTop = null;
+
     requestAnimationFrame(() => {
       this._applyViewportHeight();
-      if (this._config && !this._scrollPositioned) {
-        this._positionScroll("connected", true);
-      }
+      if (this._config) this._positionScroll("connected", true);
     });
+
     if (this._hass && !this._config) this._initialize();
   }
 
   disconnectedCallback() {
     window.removeEventListener("resize", this._viewportHandler);
+    window.removeEventListener("focus", this._focusHandler);
+    document.removeEventListener("visibilitychange", this._visibilityHandler);
     if (this._refreshTimer) clearInterval(this._refreshTimer);
     if (this._calendarRefreshTimer) clearInterval(this._calendarRefreshTimer);
     this._clearCalendarSubscriptions();
@@ -88,6 +102,9 @@ class WeekPlannerPanel extends HTMLElement {
     if (!this._hass || this._initializing) return;
     this._initializing = true;
     this._initialScrolled = false;
+    this._scrollState = "auto";
+    this._scrollPositioned = false;
+    this._scrollRequestId++;
     this._savedScrollTop = null;
     this._savedScrollLeft = 0;
     try {
@@ -187,23 +204,41 @@ class WeekPlannerPanel extends HTMLElement {
     return `${date.getFullYear()}-${date.getMonth()+1}-${date.getDate()}-${date.getHours()}`;
   }
 
-  _scrollTargetForMode() {
+  _scrollTargetForMode(scroll) {
     const mode = this._effectiveScrollMode();
     if (mode === "none") return null;
 
     if (mode === "follow_now") {
       const now = this._now();
-      return Math.max(0, (this._minutes(now) / 60 * HOUR_HEIGHT) - 8);
+      const nowY = this._minutes(now) / 60 * HOUR_HEIGHT;
+
+      // Desired behavior:
+      // 1. Put NOW as high as possible to maximize future hours.
+      // 2. Never scroll beyond the last viewport that still ends at 24:00.
+      //    maxScroll is exactly "end of day - viewport height".
+      const maxScroll = Math.max(0, scroll.scrollHeight - scroll.clientHeight);
+      return Math.max(0, Math.min(maxScroll, nowY - 8));
     }
 
     return Math.max(0, this._effectiveScrollHour() * HOUR_HEIGHT - 8);
   }
 
+  _resumeAutoScroll(reason = "focus") {
+    if (!this._config) return;
+    this._scrollState = "auto";
+    this._scrollPositioned = false;
+    this._savedScrollTop = null;
+    this._scrollRequestId++;
+    this._positionScroll(reason, true);
+  }
+
   _positionScroll(reason = "initial", force = false) {
     const mode = this._effectiveScrollMode();
 
-    // Cancel every older pending scroll attempt. Only the newest explicit
-    // request is allowed to move the timeline.
+    // Manual override wins until a deliberate focus/reload lifecycle event
+    // resets the controller back to AUTO.
+    if (this._scrollState === "manual" && reason !== "connected") return;
+
     const requestId = ++this._scrollRequestId;
 
     if (mode === "none") {
@@ -237,11 +272,15 @@ class WeekPlannerPanel extends HTMLElement {
             return;
           }
 
-          const desired = this._scrollTargetForMode();
+          const desired = this._scrollTargetForMode(scroll);
           if (desired === null) return;
 
           const target = Math.max(0, Math.min(maxScroll, desired));
-          this._programmaticScroll = true;
+
+          // Scroll events can arrive slightly after scrollTop assignment.
+          // Use a short time guard so our own movement is never mistaken for
+          // a user/manual override.
+          this._programmaticScrollUntil = Date.now() + 250;
           scroll.scrollTop = target;
           this._savedScrollTop = target;
           this._savedScrollLeft = scroll.scrollLeft || 0;
@@ -251,10 +290,6 @@ class WeekPlannerPanel extends HTMLElement {
           if (mode === "follow_now") {
             this._lastFollowNowHourKey = this._followNowHourKey(this._now());
           }
-
-          requestAnimationFrame(() => {
-            this._programmaticScroll = false;
-          });
         });
       });
     };
@@ -285,12 +320,11 @@ class WeekPlannerPanel extends HTMLElement {
   }
 
   _checkFollowNow() {
-    if (!this._shouldFollowNow()) return;
+    if (!this._shouldFollowNow() || this._scrollState === "manual") return;
 
     const now = this._now();
     const hourKey = this._followNowHourKey(now);
 
-    // Only explicit lifecycle events and hour changes may reposition Follow NOW.
     if (!this._scrollPositioned || this._lastFollowNowHourKey !== hourKey) {
       this._positionScroll("hour-change", true);
     }
@@ -310,7 +344,9 @@ class WeekPlannerPanel extends HTMLElement {
     const delay = Math.max(1000, nextHour.getTime() - now.getTime());
 
     this._followNowTimer = setTimeout(() => {
-      this._positionScroll("hour-boundary", true);
+      if (this._scrollState === "auto") {
+        this._positionScroll("hour-boundary", true);
+      }
       this._scheduleFollowNow();
     }, delay);
   }
@@ -1908,6 +1944,11 @@ class WeekPlannerPanel extends HTMLElement {
         if (this._scrollPositioned) {
           this._savedScrollTop = timelineScroll.scrollTop;
           this._savedScrollLeft = timelineScroll.scrollLeft;
+
+          if (Date.now() > this._programmaticScrollUntil) {
+            this._scrollState = "manual";
+            this._scrollRequestId++;
+          }
         }
         headerScroll.scrollLeft = timelineScroll.scrollLeft;
       }, { passive:true });
@@ -1980,11 +2021,10 @@ class WeekPlannerPanel extends HTMLElement {
 
       if (scroll) {
         if (this._savedScrollTop !== null && this._scrollPositioned) {
-          this._programmaticScroll = true;
+          this._programmaticScrollUntil = Date.now() + 250;
           scroll.scrollTop = this._savedScrollTop;
           scroll.scrollLeft = this._savedScrollLeft || 0;
           if (header) header.scrollLeft = scroll.scrollLeft;
-          requestAnimationFrame(() => { this._programmaticScroll = false; });
         } else if (allowScroll && !this._loading && !this._scrollPositioned) {
           this._positionScroll("initial-render", true);
         }
@@ -2861,6 +2901,7 @@ class WeekPlannerPanel extends HTMLElement {
 
         if (scrollModeChanged) {
           this._initialScrolled = false;
+          this._scrollState = "auto";
           this._scrollPositioned = false;
           this._scrollRequestId++;
           this._savedScrollTop = null;
@@ -3015,7 +3056,7 @@ class WeekPlannerDashboardCard extends WeekPlannerPanel {
 
     // Only an unpositioned planner may request automatic positioning here.
     // Normal resizes and data refreshes preserve the existing scrollTop.
-    if (!this._scrollPositioned) {
+    if (this._scrollState === "auto" && !this._scrollPositioned) {
       this._positionScroll("viewport-ready", true);
     }
   }
@@ -3122,6 +3163,7 @@ class WeekPlannerCard extends WeekPlannerPanel {
     };
 
     this._initialScrolled = false;
+    this._scrollState = "auto";
     this._scrollPositioned = false;
     this._scrollRequestId++;
     this._savedScrollTop = null;
@@ -3721,14 +3763,14 @@ if (!customElements.get("week-planner-card")) {
   customElements.define("week-planner-card", WeekPlannerCard);
 }
 
-window.weekPlannerFrontendVersion = "0.5.3-dev";
+window.weekPlannerFrontendVersion = "0.5.3-dev.2";
 window.customCards = window.customCards || [];
 
 if (!window.customCards.some((card) => card.type === "week-planner-card")) {
   window.customCards.push({
     type: "week-planner-card",
     name: "Week Planner Card",
-    description: "Week Planner dashboard card · frontend v0.5.3-dev",
+    description: "Week Planner dashboard card · frontend v0.5.3-dev.2",
     preview: false,
   });
 }
