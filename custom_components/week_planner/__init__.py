@@ -31,6 +31,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ICON, CONF_TYPE, CONF_URL, SUN_EVENT_SUNRISE, SUN_EVENT_SUNSET
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.sun import get_astral_event_date
 from homeassistant.util import dt as dt_util
 
@@ -66,6 +67,8 @@ _FRONTEND_REGISTERED = False
 _WS_REGISTERED = False
 
 _LOGGER = logging.getLogger(__name__)
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 _RESOURCE_BASE_URL = f"{STATIC_URL}/week-planner.js"
 _DASHBOARD_CARD_TYPE = "custom:week-planner-dashboard-card"
 
