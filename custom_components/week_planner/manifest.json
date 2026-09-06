@@ -17,5 +17,5 @@
     "ephem==4.2.1"
   ],
   "single_config_entry": true,
-  "version": "0.5.3-dev.2"
+  "version": "0.5.3-dev.3"
 }
