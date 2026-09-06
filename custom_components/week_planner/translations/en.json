@@ -1,0 +1,49 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Week Planner",
+        "description": "Choose the weather entity and calendars shown in Week Planner.",
+        "data": {
+          "weather_entity": "Weather source",
+          "calendar_entities": "Calendars",
+          "weather_display": "Weather display",
+          "show_week_number": "Show week number",
+          "default_scroll_hour": "Default first visible hour",
+          "show_sun_markers": "Show sunrise/sunset",
+          "enlarge_today": "Enlarge today",
+          "view_mode": "View mode",
+          "show_moon_markers": "Show moon phase changes",
+          "show_energy_prices": "Show electricity prices",
+          "energy_entity": "Electricity price sensor",
+          "scroll_mode": "Timeline focus mode"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Week Planner is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configure Week Planner",
+        "description": "Change the weather source and calendars shown in Week Planner.",
+        "data": {
+          "weather_entity": "Weather source",
+          "calendar_entities": "Calendars",
+          "weather_display": "Weather display",
+          "show_week_number": "Show week number",
+          "default_scroll_hour": "Default first visible hour",
+          "show_sun_markers": "Show sunrise/sunset",
+          "enlarge_today": "Enlarge today",
+          "view_mode": "View mode",
+          "show_moon_markers": "Show moon phase changes",
+          "show_energy_prices": "Show electricity prices",
+          "energy_entity": "Electricity price sensor",
+          "scroll_mode": "Timeline focus mode"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "domain": "week_planner",
+  "name": "Week Planner",
+  "version": "0.5.0",
+  "documentation": "https://github.com/your-github-user/ha-week-planner",
+  "issue_tracker": "https://github.com/your-github-user/ha-week-planner/issues",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": [
+    "frontend",
+    "http",
+    "lovelace"
+  ],
+  "iot_class": "local_push",
+  "single_config_entry": true,
+  "requirements": [
+    "ephem==4.2.1"
+  ]
+}

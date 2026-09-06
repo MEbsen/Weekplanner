@@ -1,0 +1,49 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Week Planner",
+        "description": "Vælg den vejr-entity og de kalendere, der skal vises i Week Planner.",
+        "data": {
+          "weather_entity": "Vejrkilde",
+          "calendar_entities": "Kalendere",
+          "weather_display": "Vejrvisning",
+          "show_week_number": "Vis ugenummer",
+          "default_scroll_hour": "Første synlige time",
+          "show_sun_markers": "Vis solopgang/solnedgang",
+          "enlarge_today": "Gør i dag bredere",
+          "view_mode": "Visningstype",
+          "show_moon_markers": "Vis månefaseskift",
+          "show_energy_prices": "Vis elpriser",
+          "energy_entity": "Elpris-sensor",
+          "scroll_mode": "Tidslinjens fokus"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Week Planner er allerede konfigureret."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Konfigurer Week Planner",
+        "description": "Skift den vejrkilde og de kalendere, der vises i Week Planner.",
+        "data": {
+          "weather_entity": "Vejrkilde",
+          "calendar_entities": "Kalendere",
+          "weather_display": "Vejrvisning",
+          "show_week_number": "Vis ugenummer",
+          "default_scroll_hour": "Første synlige time",
+          "show_sun_markers": "Vis solopgang/solnedgang",
+          "enlarge_today": "Gør i dag bredere",
+          "view_mode": "Visningstype",
+          "show_moon_markers": "Vis månefaseskift",
+          "show_energy_prices": "Vis elpriser",
+          "energy_entity": "Elpris-sensor",
+          "scroll_mode": "Tidslinjens fokus"
+        }
+      }
+    }
+  }
+}
