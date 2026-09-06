@@ -772,3 +772,13 @@ Removing the Week Planner integration removes its managed dashboard/resource.
 - Minute updates now move only the current-time indicator instead of re-rendering the whole planner.
 - Follow NOW repositions only on initial load and when the hour changes.
 - Manual scrolling is therefore no longer overridden every minute.
+
+
+## 0.5.3-dev.2 — Day-focus scroll controller
+
+- Reworked Follow NOW as a deterministic AUTO/MANUAL state machine.
+- AUTO places NOW as high as possible while never scrolling beyond the final viewport ending at 24:00.
+- User scrolling switches to MANUAL and remains static until reload or panel focus.
+- Data refreshes preserve the current scroll position and never trigger automatic repositioning.
+- First load, panel focus, and hourly changes re-evaluate day focus only while in AUTO.
+- The behavior is shared by the native dashboard and the Week Planner card.
