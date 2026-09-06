@@ -41,6 +41,7 @@ class WeekPlannerPanel extends HTMLElement {
     this._lastFollowNowHourKey = "";
     this._scrollState = "auto";
     this._programmaticScrollUntil = 0;
+    this._renderGeneration = 0;
     this._settingsOpen = false;
     this._renderPendingWhileSettingsOpen = false;
     this._serverTimeOffsetMs = 0;
@@ -1076,7 +1077,7 @@ class WeekPlannerPanel extends HTMLElement {
     // Rendering is never allowed to decide where the user should be.
     // Preserve the current timeline position before replacing DOM.
     const previousScroll = this.shadowRoot.getElementById("scroll");
-    if (previousScroll && this._scrollPositioned) {
+    if (previousScroll && this._scrollPositioned && this._scrollState === "manual") {
       this._savedScrollTop = previousScroll.scrollTop;
       this._savedScrollLeft = previousScroll.scrollLeft || 0;
     }
@@ -1941,14 +1942,11 @@ class WeekPlannerPanel extends HTMLElement {
     const timelineScroll = this.shadowRoot.getElementById("scroll");
     if (headerScroll && timelineScroll) {
       timelineScroll.addEventListener("scroll", () => {
-        if (this._scrollPositioned) {
+        if (this._scrollPositioned && Date.now() > this._programmaticScrollUntil) {
           this._savedScrollTop = timelineScroll.scrollTop;
           this._savedScrollLeft = timelineScroll.scrollLeft;
-
-          if (Date.now() > this._programmaticScrollUntil) {
-            this._scrollState = "manual";
-            this._scrollRequestId++;
-          }
+          this._scrollState = "manual";
+          this._scrollRequestId++;
         }
         headerScroll.scrollLeft = timelineScroll.scrollLeft;
       }, { passive:true });
@@ -2014,22 +2012,66 @@ class WeekPlannerPanel extends HTMLElement {
       el.addEventListener("click", () => this._showDailyWeather(JSON.parse(decodeURIComponent(el.dataset.dailyWeather)), el));
     });
 
-    requestAnimationFrame(() => {
-      this._applyViewportHeight();
-      const scroll = this.shadowRoot.getElementById("scroll");
-      const header = this.shadowRoot.getElementById("headerScroll");
+    const renderGeneration = ++this._renderGeneration;
 
-      if (scroll) {
-        if (this._savedScrollTop !== null && this._scrollPositioned) {
-          this._programmaticScrollUntil = Date.now() + 250;
-          scroll.scrollTop = this._savedScrollTop;
-          scroll.scrollLeft = this._savedScrollLeft || 0;
-          if (header) header.scrollLeft = scroll.scrollLeft;
-        } else if (allowScroll && !this._loading && !this._scrollPositioned) {
-          this._positionScroll("initial-render", true);
-        }
-      }
-    });
+    const settleAfterRender = (attempt = 0) => {
+      const delays = [0, 50, 120, 240, 450, 800];
+
+      setTimeout(() => {
+        if (renderGeneration !== this._renderGeneration) return;
+
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            if (renderGeneration !== this._renderGeneration) return;
+
+            this._applyViewportHeight();
+
+            const scroll = this.shadowRoot.getElementById("scroll");
+            const header = this.shadowRoot.getElementById("headerScroll");
+            if (!scroll) return;
+
+            const measurable =
+              scroll.scrollHeight > 0 &&
+              scroll.clientHeight > 0 &&
+              scroll.scrollHeight > scroll.clientHeight;
+
+            if (!measurable && attempt + 1 < delays.length) {
+              settleAfterRender(attempt + 1);
+              return;
+            }
+
+            if (this._scrollState === "manual") {
+              // Manual means the user owns the viewport. Re-render only
+              // restores that exact viewport and never recalculates it.
+              if (this._savedScrollTop !== null) {
+                this._programmaticScrollUntil = Date.now() + 300;
+                scroll.scrollTop = Math.max(
+                  0,
+                  Math.min(
+                    Math.max(0, scroll.scrollHeight - scroll.clientHeight),
+                    this._savedScrollTop
+                  )
+                );
+                scroll.scrollLeft = this._savedScrollLeft || 0;
+                if (header) header.scrollLeft = scroll.scrollLeft;
+              }
+              return;
+            }
+
+            if (allowScroll && !this._loading) {
+              // AUTO never restores an old browser scroll position after a
+              // re-render. It re-evaluates the correct day focus from the
+              // freshly laid-out timeline instead.
+              this._scrollPositioned = false;
+              this._savedScrollTop = null;
+              this._positionScroll("post-render", true);
+            }
+          });
+        });
+      }, delays[Math.min(attempt, delays.length - 1)]);
+    };
+
+    settleAfterRender();
   }
 
   _scrollToConfiguredStart() {
@@ -3763,14 +3805,14 @@ if (!customElements.get("week-planner-card")) {
   customElements.define("week-planner-card", WeekPlannerCard);
 }
 
-window.weekPlannerFrontendVersion = "0.5.3-dev.2";
+window.weekPlannerFrontendVersion = "0.5.3-dev.3";
 window.customCards = window.customCards || [];
 
 if (!window.customCards.some((card) => card.type === "week-planner-card")) {
   window.customCards.push({
     type: "week-planner-card",
     name: "Week Planner Card",
-    description: "Week Planner dashboard card · frontend v0.5.3-dev.2",
+    description: "Week Planner dashboard card · frontend v0.5.3-dev.3",
     preview: false,
   });
 }
