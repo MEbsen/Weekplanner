@@ -23,6 +23,7 @@ jobs:
           rm -rf /tmp/weekplanner
           mkdir -p /tmp/weekplanner
           unzip -o /tmp/weekplanner.zip -d /tmp/weekplanner
+          rm -f /tmp/weekplanner/.github/workflows/validate.yml
           cp -a /tmp/weekplanner/. .
           rm -rf _bootstrap
       - name: Commit Week Planner 0.5.0
