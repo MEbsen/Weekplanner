@@ -2058,10 +2058,12 @@ class WeekPlannerPanel extends HTMLElement {
               return;
             }
 
-            if (allowScroll && !this._loading) {
-              // AUTO never restores an old browser scroll position after a
-              // re-render. It re-evaluates the correct day focus from the
-              // freshly laid-out timeline instead.
+            if (!this._loading && this._scrollState === "auto") {
+              // Every DOM rebuild creates a brand new scroll element whose
+              // browser default is scrollTop=0. Therefore AUTO must always
+              // re-evaluate day focus after any completed render, including
+              // renders triggered by calendar push/fallback refresh, periodic
+              // data refresh, weather/energy updates, and UI visibility toggles.
               this._scrollPositioned = false;
               this._savedScrollTop = null;
               this._positionScroll("post-render", true);
@@ -3805,14 +3807,14 @@ if (!customElements.get("week-planner-card")) {
   customElements.define("week-planner-card", WeekPlannerCard);
 }
 
-window.weekPlannerFrontendVersion = "0.5.3-dev.3";
+window.weekPlannerFrontendVersion = "0.5.3-dev.4";
 window.customCards = window.customCards || [];
 
 if (!window.customCards.some((card) => card.type === "week-planner-card")) {
   window.customCards.push({
     type: "week-planner-card",
     name: "Week Planner Card",
-    description: "Week Planner dashboard card · frontend v0.5.3-dev.3",
+    description: "Week Planner dashboard card · frontend v0.5.3-dev.4",
     preview: false,
   });
 }
