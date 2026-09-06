@@ -29,8 +29,6 @@ class WeekPlannerPanel extends HTMLElement {
     this._calendarUnsubscribers = [];
     this._calendarSubscriptionKey = "";
     this._nowTimer = null;
-    this._followNowTimer = null;
-    this._lastFollowNowHourKey = "";
     this._isDashboardCard = false;
     this._sessionVisibility = { weather:true, sun:true, energy:true };
     this._initialScrolled = false;
@@ -38,7 +36,6 @@ class WeekPlannerPanel extends HTMLElement {
     this._scrollRequestId = 0;
     this._savedScrollTop = null;
     this._savedScrollLeft = 0;
-    this._lastFollowNowHourKey = "";
     this._scrollState = "auto";
     this._programmaticScrollUntil = 0;
     this._renderGeneration = 0;
@@ -89,7 +86,6 @@ class WeekPlannerPanel extends HTMLElement {
     if (this._calendarRefreshTimer) clearInterval(this._calendarRefreshTimer);
     this._clearCalendarSubscriptions();
     if (this._nowTimer) clearInterval(this._nowTimer);
-    if (this._followNowTimer) clearTimeout(this._followNowTimer);
   }
 
   _applyViewportHeight() {
@@ -162,9 +158,7 @@ class WeekPlannerPanel extends HTMLElement {
       }, 5 * 60 * 1000);
       this._nowTimer = setInterval(() => {
         this._updateNowIndicator();
-        this._checkFollowNow();
       }, 60 * 1000);
-      this._scheduleFollowNow();
     } catch (err) {
       this._error = `Kunne ikke initialisere Week Planner: ${err?.message || err}`;
       this._loading = false;
@@ -199,10 +193,6 @@ class WeekPlannerPanel extends HTMLElement {
 
   _shouldFollowNow() {
     return this._effectiveScrollMode() === "follow_now";
-  }
-
-  _followNowHourKey(date = this._now()) {
-    return `${date.getFullYear()}-${date.getMonth()+1}-${date.getDate()}-${date.getHours()}`;
   }
 
   _scrollTargetForMode(scroll) {
@@ -288,9 +278,6 @@ class WeekPlannerPanel extends HTMLElement {
           this._scrollPositioned = true;
           this._initialScrolled = true;
 
-          if (mode === "follow_now") {
-            this._lastFollowNowHourKey = this._followNowHourKey(this._now());
-          }
         });
       });
     };
@@ -320,37 +307,6 @@ class WeekPlannerPanel extends HTMLElement {
     }
   }
 
-  _checkFollowNow() {
-    if (!this._shouldFollowNow() || this._scrollState === "manual") return;
-
-    const now = this._now();
-    const hourKey = this._followNowHourKey(now);
-
-    if (!this._scrollPositioned || this._lastFollowNowHourKey !== hourKey) {
-      this._positionScroll("hour-change", true);
-    }
-  }
-
-  _scheduleFollowNow() {
-    if (this._followNowTimer) {
-      clearTimeout(this._followNowTimer);
-      this._followNowTimer = null;
-    }
-
-    if (!this._shouldFollowNow()) return;
-
-    const now = this._now();
-    const nextHour = new Date(now);
-    nextHour.setHours(now.getHours() + 1, 0, 0, 0);
-    const delay = Math.max(1000, nextHour.getTime() - now.getTime());
-
-    this._followNowTimer = setTimeout(() => {
-      if (this._scrollState === "auto") {
-        this._positionScroll("hour-boundary", true);
-      }
-      this._scheduleFollowNow();
-    }, delay);
-  }
 
   _weatherVisibleNow() {
     return this._sessionVisibility?.weather !== false;
@@ -2949,10 +2905,7 @@ class WeekPlannerPanel extends HTMLElement {
           this._scrollPositioned = false;
           this._scrollRequestId++;
           this._savedScrollTop = null;
-          this._lastFollowNowHourKey = "";
-        }
-        this._scheduleFollowNow();
-        this._checkFollowNow();
+              }
 
         const expectedHistory = JSON.stringify(historySources);
         const actualHistory = JSON.stringify(verifiedConfig.history_sources || []);
@@ -3211,8 +3164,6 @@ class WeekPlannerCard extends WeekPlannerPanel {
     this._scrollPositioned = false;
     this._scrollRequestId++;
     this._savedScrollTop = null;
-    this._lastFollowNowHourKey = "";
-    this._scheduleFollowNow();
 
     this._applyViewportHeight();
 
@@ -3807,14 +3758,14 @@ if (!customElements.get("week-planner-card")) {
   customElements.define("week-planner-card", WeekPlannerCard);
 }
 
-window.weekPlannerFrontendVersion = "0.5.3-dev.4";
+window.weekPlannerFrontendVersion = "0.5.3-dev.5";
 window.customCards = window.customCards || [];
 
 if (!window.customCards.some((card) => card.type === "week-planner-card")) {
   window.customCards.push({
     type: "week-planner-card",
     name: "Week Planner Card",
-    description: "Week Planner dashboard card · frontend v0.5.3-dev.4",
+    description: "Week Planner dashboard card · frontend v0.5.3-dev.5",
     preview: false,
   });
 }
