@@ -214,6 +214,11 @@ class WeekPlannerPanel extends HTMLElement {
     return Math.max(0, this._effectiveScrollHour() * HOUR_HEIGHT - 8);
   }
 
+  _shouldAutoRepositionAfterRender() {
+    const mode = this._effectiveScrollMode();
+    return this._scrollState === "auto" && mode === "follow_now";
+  }
+
   _resumeAutoScroll(reason = "focus") {
     if (!this._config) return;
     this._scrollState = "auto";
@@ -1033,9 +1038,12 @@ class WeekPlannerPanel extends HTMLElement {
     // Rendering is never allowed to decide where the user should be.
     // Preserve the current timeline position before replacing DOM.
     const previousScroll = this.shadowRoot.getElementById("scroll");
-    if (previousScroll && this._scrollPositioned && this._scrollState === "manual") {
-      this._savedScrollTop = previousScroll.scrollTop;
-      this._savedScrollLeft = previousScroll.scrollLeft || 0;
+    if (previousScroll && this._scrollPositioned) {
+      const mode = this._effectiveScrollMode();
+      if (this._scrollState === "manual" || mode === "fixed") {
+        this._savedScrollTop = previousScroll.scrollTop;
+        this._savedScrollLeft = previousScroll.scrollLeft || 0;
+      }
     }
 
     if (this._settingsOpen) {
@@ -2015,14 +2023,29 @@ class WeekPlannerPanel extends HTMLElement {
             }
 
             if (!this._loading && this._scrollState === "auto") {
-              // Every DOM rebuild creates a brand new scroll element whose
-              // browser default is scrollTop=0. Therefore AUTO must always
-              // re-evaluate day focus after any completed render, including
-              // renders triggered by calendar push/fallback refresh, periodic
-              // data refresh, weather/energy updates, and UI visibility toggles.
-              this._scrollPositioned = false;
-              this._savedScrollTop = null;
-              this._positionScroll("post-render", true);
+              if (this._shouldAutoRepositionAfterRender()) {
+                // Follow NOW tracks day focus, so a completed render may
+                // re-evaluate the optimal viewport from the fresh layout.
+                this._scrollPositioned = false;
+                this._savedScrollTop = null;
+                this._positionScroll("post-render", true);
+              } else if (this._effectiveScrollMode() === "fixed") {
+                // Fixed-time mode does NOT reposition on normal data refresh.
+                // Preserve the current viewport exactly; only load/focus or a
+                // changed scroll setting re-applies the configured hour.
+                if (this._savedScrollTop !== null) {
+                  this._programmaticScrollUntil = Date.now() + 300;
+                  scroll.scrollTop = Math.max(
+                    0,
+                    Math.min(
+                      Math.max(0, scroll.scrollHeight - scroll.clientHeight),
+                      this._savedScrollTop
+                    )
+                  );
+                  scroll.scrollLeft = this._savedScrollLeft || 0;
+                  if (header) header.scrollLeft = scroll.scrollLeft;
+                }
+              }
             }
           });
         });
@@ -3758,14 +3781,14 @@ if (!customElements.get("week-planner-card")) {
   customElements.define("week-planner-card", WeekPlannerCard);
 }
 
-window.weekPlannerFrontendVersion = "0.5.3-dev.5";
+window.weekPlannerFrontendVersion = "0.5.3-dev.6";
 window.customCards = window.customCards || [];
 
 if (!window.customCards.some((card) => card.type === "week-planner-card")) {
   window.customCards.push({
     type: "week-planner-card",
     name: "Week Planner Card",
-    description: "Week Planner dashboard card · frontend v0.5.3-dev.5",
+    description: "Week Planner dashboard card · frontend v0.5.3-dev.6",
     preview: false,
   });
 }
