@@ -1,7 +1,7 @@
 {
   "domain": "week_planner",
   "name": "Week Planner",
-  "version": "0.5.2",
+  "version": "0.5.3-dev",
   "documentation": "https://github.com/MEbsen/Weekplanner",
   "issue_tracker": "https://github.com/MEbsen/Weekplanner/issues",
   "codeowners": [
