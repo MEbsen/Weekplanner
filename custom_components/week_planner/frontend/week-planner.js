@@ -193,7 +193,9 @@ class WeekPlannerPanel extends HTMLElement {
       const desired = nowY - 8;
       const maxScroll = Math.max(0, scroll.scrollHeight - scroll.clientHeight);
 
-      // If layout has not settled yet, do not mark the initial scroll complete.
+      // Lovelace panel views often need several layout passes before the
+      // timeline has its final clientHeight. Do not mark scrolling complete
+      // until the timeline is actually measurable and scrollable.
       if (scroll.scrollHeight <= 0 || scroll.clientHeight <= 0 || maxScroll <= 0) {
         return false;
       }
@@ -207,15 +209,20 @@ class WeekPlannerPanel extends HTMLElement {
       return true;
     };
 
-    // Two frames ensure Home Assistant/Lovelace layout has calculated the
-    // timeline's final clientHeight + scrollHeight before we measure it.
-    requestAnimationFrame(() => {
+    const retryDelays = force ? [0, 80, 180, 350, 700, 1200] : [0];
+
+    const tryAt = (index) => {
       requestAnimationFrame(() => {
-        if (!perform() && force) {
-          setTimeout(() => perform(), 120);
-        }
+        requestAnimationFrame(() => {
+          if (perform()) return;
+          if (index + 1 < retryDelays.length) {
+            setTimeout(() => tryAt(index + 1), retryDelays[index + 1]);
+          }
+        });
       });
-    });
+    };
+
+    tryAt(0);
   }
 
   _checkFollowNow() {
@@ -2964,6 +2971,12 @@ class WeekPlannerDashboardCard extends WeekPlannerPanel {
     this.style.height = `${available}px`;
     this.style.maxHeight = `${available}px`;
     this.style.minHeight = `${available}px`;
+
+    // The native Lovelace panel host can receive its final height after the
+    // planner has rendered. Re-run Follow NOW once the viewport is known.
+    if (this._shouldFollowNow?.() && !this._initialScrolled) {
+      this._scrollToCurrentTime(true);
+    }
   }
 }
 
@@ -3665,14 +3678,14 @@ if (!customElements.get("week-planner-card")) {
   customElements.define("week-planner-card", WeekPlannerCard);
 }
 
-window.weekPlannerFrontendVersion = "0.5.0";
+window.weekPlannerFrontendVersion = "0.5.1";
 window.customCards = window.customCards || [];
 
 if (!window.customCards.some((card) => card.type === "week-planner-card")) {
   window.customCards.push({
     type: "week-planner-card",
     name: "Week Planner Card",
-    description: "Week Planner dashboard card · frontend v0.5.0",
+    description: "Week Planner dashboard card · frontend v0.5.1",
     preview: false,
   });
 }
