@@ -34,9 +34,14 @@ class WeekPlannerPanel extends HTMLElement {
     this._isDashboardCard = false;
     this._sessionVisibility = { weather:true, sun:true, energy:true };
     this._initialScrolled = false;
+    this._scrollPositioned = false;
+    this._scrollRequestId++;
     this._savedScrollTop = null;
     this._savedScrollLeft = 0;
     this._lastFollowNowHourKey = "";
+    this._scrollPositioned = false;
+    this._scrollRequestId = 0;
+    this._programmaticScroll = false;
     this._settingsOpen = false;
     this._renderPendingWhileSettingsOpen = false;
     this._serverTimeOffsetMs = 0;
@@ -54,7 +59,12 @@ class WeekPlannerPanel extends HTMLElement {
 
   connectedCallback() {
     window.addEventListener("resize", this._viewportHandler);
-    requestAnimationFrame(() => this._applyViewportHeight());
+    requestAnimationFrame(() => {
+      this._applyViewportHeight();
+      if (this._config && !this._scrollPositioned) {
+        this._positionScroll("connected", true);
+      }
+    });
     if (this._hass && !this._config) this._initialize();
   }
 
@@ -177,52 +187,84 @@ class WeekPlannerPanel extends HTMLElement {
     return `${date.getFullYear()}-${date.getMonth()+1}-${date.getDate()}-${date.getHours()}`;
   }
 
-  _scrollToCurrentTime(force = false) {
-    if (!this._shouldFollowNow()) return;
+  _scrollTargetForMode() {
+    const mode = this._effectiveScrollMode();
+    if (mode === "none") return null;
 
-    const perform = () => {
-      const scroll = this.shadowRoot?.getElementById("scroll");
-      if (!scroll) return false;
-
+    if (mode === "follow_now") {
       const now = this._now();
-      const nowY = this._minutes(now) / 60 * HOUR_HEIGHT;
+      return Math.max(0, (this._minutes(now) / 60 * HOUR_HEIGHT) - 8);
+    }
 
-      // Keep NOW as high as possible so the maximum amount of the
-      // upcoming day remains visible. A few pixels of padding keep the line
-      // from touching the sticky header.
-      const desired = nowY - 8;
-      const maxScroll = Math.max(0, scroll.scrollHeight - scroll.clientHeight);
+    return Math.max(0, this._effectiveScrollHour() * HOUR_HEIGHT - 8);
+  }
 
-      // Lovelace panel views often need several layout passes before the
-      // timeline has its final clientHeight. Do not mark scrolling complete
-      // until the timeline is actually measurable and scrollable.
-      if (scroll.scrollHeight <= 0 || scroll.clientHeight <= 0 || maxScroll <= 0) {
-        return false;
-      }
+  _positionScroll(reason = "initial", force = false) {
+    const mode = this._effectiveScrollMode();
 
-      const target = Math.max(0, Math.min(maxScroll, desired));
-      scroll.scrollTop = target;
-      this._savedScrollTop = target;
-      this._savedScrollLeft = scroll.scrollLeft || 0;
+    // Cancel every older pending scroll attempt. Only the newest explicit
+    // request is allowed to move the timeline.
+    const requestId = ++this._scrollRequestId;
+
+    if (mode === "none") {
+      this._scrollPositioned = true;
       this._initialScrolled = true;
-      this._lastFollowNowHourKey = this._followNowHourKey(now);
-      return true;
-    };
+      return;
+    }
 
-    const retryDelays = force ? [0, 80, 180, 350, 700, 1200] : [0];
+    const delays = force ? [0, 60, 140, 280, 500, 900] : [0];
 
-    const tryAt = (index) => {
+    const attempt = (index) => {
+      if (requestId !== this._scrollRequestId) return;
+
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
-          if (perform()) return;
-          if (index + 1 < retryDelays.length) {
-            setTimeout(() => tryAt(index + 1), retryDelays[index + 1]);
+          if (requestId !== this._scrollRequestId) return;
+
+          const scroll = this.shadowRoot?.getElementById("scroll");
+          if (!scroll) {
+            if (index + 1 < delays.length) {
+              setTimeout(() => attempt(index + 1), delays[index + 1]);
+            }
+            return;
           }
+
+          const maxScroll = Math.max(0, scroll.scrollHeight - scroll.clientHeight);
+          if (scroll.scrollHeight <= 0 || scroll.clientHeight <= 0 || maxScroll <= 0) {
+            if (index + 1 < delays.length) {
+              setTimeout(() => attempt(index + 1), delays[index + 1]);
+            }
+            return;
+          }
+
+          const desired = this._scrollTargetForMode();
+          if (desired === null) return;
+
+          const target = Math.max(0, Math.min(maxScroll, desired));
+          this._programmaticScroll = true;
+          scroll.scrollTop = target;
+          this._savedScrollTop = target;
+          this._savedScrollLeft = scroll.scrollLeft || 0;
+          this._scrollPositioned = true;
+          this._initialScrolled = true;
+
+          if (mode === "follow_now") {
+            this._lastFollowNowHourKey = this._followNowHourKey(this._now());
+          }
+
+          requestAnimationFrame(() => {
+            this._programmaticScroll = false;
+          });
         });
       });
     };
 
-    tryAt(0);
+    attempt(0);
+  }
+
+  _scrollToCurrentTime(force = false) {
+    if (!this._shouldFollowNow()) return;
+    this._positionScroll("follow-now", force);
   }
 
   _updateNowIndicator() {
@@ -230,9 +272,7 @@ class WeekPlannerPanel extends HTMLElement {
     const nowY = this._minutes(now) / 60 * HOUR_HEIGHT;
 
     const line = this.shadowRoot?.getElementById("nowLine");
-    if (line) {
-      line.style.top = `${nowY}px`;
-    }
+    if (line) line.style.top = `${nowY}px`;
 
     const label = this.shadowRoot?.getElementById("nowTime");
     if (label) {
@@ -250,10 +290,9 @@ class WeekPlannerPanel extends HTMLElement {
     const now = this._now();
     const hourKey = this._followNowHourKey(now);
 
-    // Follow NOW should not fight manual scrolling every minute.
-    // Reposition only on first load or when the hour changes.
-    if (!this._initialScrolled || this._lastFollowNowHourKey !== hourKey) {
-      this._scrollToCurrentTime(true);
+    // Only explicit lifecycle events and hour changes may reposition Follow NOW.
+    if (!this._scrollPositioned || this._lastFollowNowHourKey !== hourKey) {
+      this._positionScroll("hour-change", true);
     }
   }
 
@@ -265,14 +304,13 @@ class WeekPlannerPanel extends HTMLElement {
 
     if (!this._shouldFollowNow()) return;
 
-    // Keep an hour-boundary timer for immediate movement...
     const now = this._now();
     const nextHour = new Date(now);
     nextHour.setHours(now.getHours() + 1, 0, 0, 0);
     const delay = Math.max(1000, nextHour.getTime() - now.getTime());
 
     this._followNowTimer = setTimeout(() => {
-      this._scrollToCurrentTime(true);
+      this._positionScroll("hour-boundary", true);
       this._scheduleFollowNow();
     }, delay);
   }
@@ -998,6 +1036,14 @@ class WeekPlannerPanel extends HTMLElement {
 
   _render(allowScroll = true) {
     if (!this.shadowRoot) return;
+
+    // Rendering is never allowed to decide where the user should be.
+    // Preserve the current timeline position before replacing DOM.
+    const previousScroll = this.shadowRoot.getElementById("scroll");
+    if (previousScroll && this._scrollPositioned) {
+      this._savedScrollTop = previousScroll.scrollTop;
+      this._savedScrollLeft = previousScroll.scrollLeft || 0;
+    }
 
     if (this._settingsOpen) {
       this._renderPendingWhileSettingsOpen = true;
@@ -1859,7 +1905,7 @@ class WeekPlannerPanel extends HTMLElement {
     const timelineScroll = this.shadowRoot.getElementById("scroll");
     if (headerScroll && timelineScroll) {
       timelineScroll.addEventListener("scroll", () => {
-        if (this._initialScrolled) {
+        if (this._scrollPositioned) {
           this._savedScrollTop = timelineScroll.scrollTop;
           this._savedScrollLeft = timelineScroll.scrollLeft;
         }
@@ -1933,48 +1979,21 @@ class WeekPlannerPanel extends HTMLElement {
       const header = this.shadowRoot.getElementById("headerScroll");
 
       if (scroll) {
-        if (this._savedScrollTop !== null) {
+        if (this._savedScrollTop !== null && this._scrollPositioned) {
+          this._programmaticScroll = true;
           scroll.scrollTop = this._savedScrollTop;
           scroll.scrollLeft = this._savedScrollLeft || 0;
           if (header) header.scrollLeft = scroll.scrollLeft;
-        } else if (allowScroll && !this._loading && !this._initialScrolled) {
-          this._scrollToConfiguredStart();
+          requestAnimationFrame(() => { this._programmaticScroll = false; });
+        } else if (allowScroll && !this._loading && !this._scrollPositioned) {
+          this._positionScroll("initial-render", true);
         }
       }
     });
   }
 
   _scrollToConfiguredStart() {
-    const mode = this._effectiveScrollMode();
-
-    if (mode === "none") {
-      // No programmatic scrolling at all. Keep the browser's natural top
-      // position and mark initial positioning complete.
-      this._initialScrolled = true;
-      this._savedScrollTop = null;
-      return;
-    }
-
-    if (mode === "follow_now") {
-      this._scrollToCurrentTime(true);
-      return;
-    }
-
-    const scroll = this.shadowRoot.getElementById("scroll");
-    if (!scroll) return;
-
-    const startHour = this._effectiveScrollHour();
-    const desired = Math.max(0, startHour * HOUR_HEIGHT - 8);
-    const maxScroll = Math.max(0, scroll.scrollHeight - scroll.clientHeight);
-    const target = Math.max(0, Math.min(maxScroll, desired));
-
-    scroll.scrollTop = target;
-    this._savedScrollTop = target;
-    requestAnimationFrame(() => {
-      scroll.scrollTop = target;
-      this._savedScrollTop = target;
-    });
-    this._initialScrolled = true;
+    this._positionScroll("configured-start", true);
   }
 
   _showHistoryMarker(item) {
@@ -2842,6 +2861,8 @@ class WeekPlannerPanel extends HTMLElement {
 
         if (scrollModeChanged) {
           this._initialScrolled = false;
+          this._scrollPositioned = false;
+          this._scrollRequestId++;
           this._savedScrollTop = null;
           this._lastFollowNowHourKey = "";
         }
@@ -2992,10 +3013,10 @@ class WeekPlannerDashboardCard extends WeekPlannerPanel {
     this.style.maxHeight = `${available}px`;
     this.style.minHeight = `${available}px`;
 
-    // The native Lovelace panel host can receive its final height after the
-    // planner has rendered. Re-run Follow NOW once the viewport is known.
-    if (this._shouldFollowNow?.() && !this._initialScrolled) {
-      this._scrollToCurrentTime(true);
+    // Only an unpositioned planner may request automatic positioning here.
+    // Normal resizes and data refreshes preserve the existing scrollTop.
+    if (!this._scrollPositioned) {
+      this._positionScroll("viewport-ready", true);
     }
   }
 }
@@ -3101,6 +3122,8 @@ class WeekPlannerCard extends WeekPlannerPanel {
     };
 
     this._initialScrolled = false;
+    this._scrollPositioned = false;
+    this._scrollRequestId++;
     this._savedScrollTop = null;
     this._lastFollowNowHourKey = "";
     this._scheduleFollowNow();
@@ -3698,14 +3721,14 @@ if (!customElements.get("week-planner-card")) {
   customElements.define("week-planner-card", WeekPlannerCard);
 }
 
-window.weekPlannerFrontendVersion = "0.5.2";
+window.weekPlannerFrontendVersion = "0.5.3-dev";
 window.customCards = window.customCards || [];
 
 if (!window.customCards.some((card) => card.type === "week-planner-card")) {
   window.customCards.push({
     type: "week-planner-card",
     name: "Week Planner Card",
-    description: "Week Planner dashboard card · frontend v0.5.2",
+    description: "Week Planner dashboard card · frontend v0.5.3-dev",
     preview: false,
   });
 }
