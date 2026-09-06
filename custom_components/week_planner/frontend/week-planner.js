@@ -133,7 +133,7 @@ class WeekPlannerPanel extends HTMLElement {
         await this._loadData(false);
       }, 5 * 60 * 1000);
       this._nowTimer = setInterval(() => {
-        this._render(false);
+        this._updateNowIndicator();
         this._checkFollowNow();
       }, 60 * 1000);
       this._scheduleFollowNow();
@@ -225,13 +225,33 @@ class WeekPlannerPanel extends HTMLElement {
     tryAt(0);
   }
 
+  _updateNowIndicator() {
+    const now = this._now();
+    const nowY = this._minutes(now) / 60 * HOUR_HEIGHT;
+
+    const line = this.shadowRoot?.getElementById("nowLine");
+    if (line) {
+      line.style.top = `${nowY}px`;
+    }
+
+    const label = this.shadowRoot?.getElementById("nowTime");
+    if (label) {
+      label.style.top = `${nowY}px`;
+      label.textContent = now.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    }
+  }
+
   _checkFollowNow() {
     if (!this._shouldFollowNow()) return;
 
     const now = this._now();
     const hourKey = this._followNowHourKey(now);
 
-    // Initial entry, full reload or first minute after an hour boundary.
+    // Follow NOW should not fight manual scrolling every minute.
+    // Reposition only on first load or when the hour changes.
     if (!this._initialScrolled || this._lastFollowNowHourKey !== hourKey) {
       this._scrollToCurrentTime(true);
     }
@@ -3678,14 +3698,14 @@ if (!customElements.get("week-planner-card")) {
   customElements.define("week-planner-card", WeekPlannerCard);
 }
 
-window.weekPlannerFrontendVersion = "0.5.1";
+window.weekPlannerFrontendVersion = "0.5.2";
 window.customCards = window.customCards || [];
 
 if (!window.customCards.some((card) => card.type === "week-planner-card")) {
   window.customCards.push({
     type: "week-planner-card",
     name: "Week Planner Card",
-    description: "Week Planner dashboard card · frontend v0.5.1",
+    description: "Week Planner dashboard card · frontend v0.5.2",
     preview: false,
   });
 }
