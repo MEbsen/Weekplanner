@@ -764,3 +764,11 @@ Removing the Week Planner integration removes its managed dashboard/resource.
 - Follow NOW now retries positioning while Lovelace finishes calculating the dashboard/card viewport.
 - The native dashboard host triggers a new Follow NOW positioning pass once its final viewport height is known.
 - Hourly follow behavior is unchanged: the current-time line is kept as high in the visible timeline as possible so more of the upcoming day remains visible.
+
+
+## 0.5.2 — Stable Follow NOW scrolling
+
+- Fixed the calendar jumping back to the top on every minute update.
+- Minute updates now move only the current-time indicator instead of re-rendering the whole planner.
+- Follow NOW repositions only on initial load and when the hour changes.
+- Manual scrolling is therefore no longer overridden every minute.
