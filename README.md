@@ -756,3 +756,11 @@ On first setup, Week Planner:
 
 Existing native Week Planner dashboard metadata is preserved on ordinary reloads.
 Removing the Week Planner integration removes its managed dashboard/resource.
+
+
+## 0.5.1 — Follow NOW dashboard fix
+
+- Fixed a regression where the native Week Planner dashboard could remain at the top of the timeline even when **Følg NU** was selected.
+- Follow NOW now retries positioning while Lovelace finishes calculating the dashboard/card viewport.
+- The native dashboard host triggers a new Follow NOW positioning pass once its final viewport height is known.
+- Hourly follow behavior is unchanged: the current-time line is kept as high in the visible timeline as possible so more of the upcoming day remains visible.
