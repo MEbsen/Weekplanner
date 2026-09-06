@@ -1,0 +1,41 @@
+name: Create development pre-release
+
+on:
+  push:
+    branches:
+      - dev
+    paths:
+      - ".github/prerelease-trigger.txt"
+
+permissions:
+  contents: write
+
+jobs:
+  prerelease:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout dev
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+
+      - name: Read pre-release version
+        id: version
+        run: |
+          VERSION="$(tr -d '\r\n ' < .github/prerelease-trigger.txt)"
+          if [ -z "$VERSION" ]; then
+            echo "Version trigger is empty"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          gh release create "v$VERSION" \
+            --target dev \
+            --prerelease \
+            --title "Week Planner $VERSION" \
+            --notes "Development test build from the dev branch. HACS Validation and Hassfest are expected to pass before testing."
