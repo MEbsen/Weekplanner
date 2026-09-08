@@ -464,6 +464,29 @@ class WeekPlannerPanel extends HTMLElement {
     return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}${sign}${oh}:${om}`;
   }
 
+  _stableJson(value) {
+    const normalize = (input) => {
+      if (Array.isArray(input)) return input.map(normalize);
+      if (input && typeof input === "object") {
+        return Object.keys(input).sort().reduce((acc, key) => {
+          acc[key] = normalize(input[key]);
+          return acc;
+        }, {});
+      }
+      return input;
+    };
+
+    try {
+      return JSON.stringify(normalize(value));
+    } catch {
+      return "";
+    }
+  }
+
+  _calendarDataChanged(nextEvents) {
+    return this._stableJson(this._events || {}) !== this._stableJson(nextEvents || {});
+  }
+
   async _refreshCalendarEvents(showError = true) {
     if (!this._hass || !this._config) return;
 
@@ -472,8 +495,10 @@ class WeekPlannerPanel extends HTMLElement {
     const calendars = this._config.calendar_entities || [];
 
     if (!calendars.length) {
-      this._events = {};
-      this._render(false);
+      if (Object.keys(this._events || {}).length) {
+        this._events = {};
+        this._render(false);
+      }
       return;
     }
 
@@ -489,9 +514,15 @@ class WeekPlannerPanel extends HTMLElement {
         target: { entity_id: calendars },
         return_response: true,
       });
-      this._events = calendarResult?.response || {};
+      const nextEvents = calendarResult?.response || {};
+      const changed = this._calendarDataChanged(nextEvents);
+
+      this._events = nextEvents;
       if (showError && this._error?.startsWith("Kalenderdata")) this._error = "";
-      this._render(false);
+
+      if (changed) {
+        this._render(false);
+      }
     } catch (err) {
       if (showError) {
         this._error = `Kalenderdata kunne ikke hentes: ${err?.message || err}`;
@@ -542,11 +573,17 @@ class WeekPlannerPanel extends HTMLElement {
             const events = payload?.events ?? payload?.event?.events;
             if (!Array.isArray(events)) return;
 
-            this._events = {
+            const nextEvents = {
               ...(this._events || {}),
               [entityId]: { events },
             };
-            this._render(false);
+
+            const changed = this._calendarDataChanged(nextEvents);
+            this._events = nextEvents;
+
+            if (changed) {
+              this._render(false);
+            }
           },
           {
             type: "calendar/event/subscribe",
@@ -3861,14 +3898,14 @@ if (!customElements.get("week-planner-card")) {
   customElements.define("week-planner-card", WeekPlannerCard);
 }
 
-window.weekPlannerFrontendVersion = "0.5.3-dev.7";
+window.weekPlannerFrontendVersion = "0.5.3-dev.8";
 window.customCards = window.customCards || [];
 
 if (!window.customCards.some((card) => card.type === "week-planner-card")) {
   window.customCards.push({
     type: "week-planner-card",
     name: "Week Planner Card",
-    description: "Week Planner dashboard card · frontend v0.5.3-dev.7",
+    description: "Week Planner dashboard card · frontend v0.5.3-dev.8",
     preview: false,
   });
 }
