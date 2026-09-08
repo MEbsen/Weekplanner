@@ -29,6 +29,7 @@ class WeekPlannerPanel extends HTMLElement {
     this._calendarUnsubscribers = [];
     this._calendarSubscriptionKey = "";
     this._nowTimer = null;
+    this._lastKnownDayKey = "";
     this._isDashboardCard = false;
     this._sessionVisibility = { weather:true, sun:true, energy:true };
     this._initialScrolled = false;
@@ -58,13 +59,99 @@ class WeekPlannerPanel extends HTMLElement {
     this._panel = value;
   }
 
+  _dayKey(date = this._now()) {
+    return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
+  }
+
+  _startRuntimeTimers() {
+    if (!this._config || !this._hass) return;
+
+    if (!this._calendarRefreshTimer) {
+      this._calendarRefreshTimer = setInterval(
+        () => this._refreshCalendarEvents(false),
+        60 * 1000
+      );
+    }
+
+    if (!this._refreshTimer) {
+      this._refreshTimer = setInterval(async () => {
+        try {
+          const latestConfig = await this._hass.connection.sendMessagePromise({
+            type: "week_planner/config",
+          });
+          this._syncServerTime(latestConfig.server_time);
+        } catch (err) {
+          console.debug("Week Planner server-time resync failed", err);
+        }
+        const rolled = await this._handleDayRollover();
+        if (!rolled) await this._loadData(false);
+      }, 5 * 60 * 1000);
+    }
+
+    if (!this._nowTimer) {
+      this._nowTimer = setInterval(async () => {
+        this._updateNowIndicator();
+        await this._handleDayRollover();
+      }, 60 * 1000);
+    }
+  }
+
+  _stopRuntimeTimers() {
+    if (this._refreshTimer) clearInterval(this._refreshTimer);
+    if (this._calendarRefreshTimer) clearInterval(this._calendarRefreshTimer);
+    if (this._nowTimer) clearInterval(this._nowTimer);
+    this._refreshTimer = null;
+    this._calendarRefreshTimer = null;
+    this._nowTimer = null;
+  }
+
+  async _handleDayRollover() {
+    if (!this._config) return false;
+
+    const now = this._now();
+    const dayKey = this._dayKey(now);
+
+    if (!this._lastKnownDayKey) {
+      this._lastKnownDayKey = dayKey;
+      return false;
+    }
+
+    if (dayKey === this._lastKnownDayKey) return false;
+
+    this._lastKnownDayKey = dayKey;
+
+    // Rolling views must follow the newly-started day automatically.
+    // Week views stay on the same week unless the new day belongs to a new
+    // calendar week, in which case moving to the current week is the least
+    // surprising dashboard behavior.
+    const rolling = this._config?.view_mode === "rolling" || this._isDashboardCard;
+    const nextStart = rolling
+      ? (() => {
+          const d = new Date(now);
+          d.setHours(0,0,0,0);
+          return d;
+        })()
+      : this._startOfWeek(now);
+
+    if (!this._sameDate(this._weekStart, nextStart)) {
+      this._weekStart = nextStart;
+    }
+
+    this._scrollState = "auto";
+    this._scrollPositioned = false;
+    this._savedScrollTop = null;
+    this._scrollRequestId++;
+
+    await this._loadData(false);
+    await this._setupCalendarSubscriptions();
+    return true;
+  }
+
   connectedCallback() {
     window.addEventListener("resize", this._viewportHandler);
     window.addEventListener("focus", this._focusHandler);
     document.addEventListener("visibilitychange", this._visibilityHandler);
 
-    // Returning to the panel/view is a new focus event by design:
-    // discard a previous manual override and re-evaluate the day focus.
     this._scrollState = "auto";
     this._scrollPositioned = false;
     this._scrollRequestId++;
@@ -75,17 +162,30 @@ class WeekPlannerPanel extends HTMLElement {
       if (this._config) this._positionScroll("connected", true);
     });
 
-    if (this._hass && !this._config) this._initialize();
+    if (this._hass && !this._config) {
+      this._initialize();
+    } else if (this._hass && this._config) {
+      // Lovelace may detach and reattach the element without creating a new
+      // instance. Restart everything that disconnectedCallback deliberately
+      // stopped, and refresh stale overnight/day-boundary state.
+      this._handleDayRollover()
+        .then(() => this._setupCalendarSubscriptions())
+        .then(() => this._loadData(false))
+        .catch((err) => {
+          console.error("Week Planner reconnect refresh failed", err);
+          this._error = `Week Planner kunne ikke genoptage: ${err?.message || err}`;
+          this._render();
+        });
+      this._startRuntimeTimers();
+    }
   }
 
   disconnectedCallback() {
     window.removeEventListener("resize", this._viewportHandler);
     window.removeEventListener("focus", this._focusHandler);
     document.removeEventListener("visibilitychange", this._visibilityHandler);
-    if (this._refreshTimer) clearInterval(this._refreshTimer);
-    if (this._calendarRefreshTimer) clearInterval(this._calendarRefreshTimer);
+    this._stopRuntimeTimers();
     this._clearCalendarSubscriptions();
-    if (this._nowTimer) clearInterval(this._nowTimer);
   }
 
   _applyViewportHeight() {
@@ -137,28 +237,8 @@ class WeekPlannerPanel extends HTMLElement {
       await this._loadData();
       await this._setupCalendarSubscriptions();
 
-      // Calendar-only fallback refresh. Push subscriptions should normally
-      // update faster; this ensures Week Planner itself never adds more than
-      // about one minute of delay once Home Assistant can see the event.
-      this._calendarRefreshTimer = setInterval(
-        () => this._refreshCalendarEvents(false),
-        60 * 1000
-      );
-
-      this._refreshTimer = setInterval(async () => {
-        try {
-          const latestConfig = await this._hass.connection.sendMessagePromise({
-            type: "week_planner/config",
-          });
-          this._syncServerTime(latestConfig.server_time);
-        } catch (err) {
-          console.debug("Week Planner server-time resync failed", err);
-        }
-        await this._loadData(false);
-      }, 5 * 60 * 1000);
-      this._nowTimer = setInterval(() => {
-        this._updateNowIndicator();
-      }, 60 * 1000);
+      this._lastKnownDayKey = this._dayKey(this._now());
+      this._startRuntimeTimers();
     } catch (err) {
       this._error = `Kunne ikke initialisere Week Planner: ${err?.message || err}`;
       this._loading = false;
@@ -3781,14 +3861,14 @@ if (!customElements.get("week-planner-card")) {
   customElements.define("week-planner-card", WeekPlannerCard);
 }
 
-window.weekPlannerFrontendVersion = "0.5.3-dev.6";
+window.weekPlannerFrontendVersion = "0.5.3-dev.7";
 window.customCards = window.customCards || [];
 
 if (!window.customCards.some((card) => card.type === "week-planner-card")) {
   window.customCards.push({
     type: "week-planner-card",
     name: "Week Planner Card",
-    description: "Week Planner dashboard card · frontend v0.5.3-dev.6",
+    description: "Week Planner dashboard card · frontend v0.5.3-dev.7",
     preview: false,
   });
 }
