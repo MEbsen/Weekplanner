@@ -44,9 +44,15 @@ class WeekPlannerPanel extends HTMLElement {
     this._renderPendingWhileSettingsOpen = false;
     this._serverTimeOffsetMs = 0;
     this._viewportHandler = () => this._applyViewportHeight();
-    this._focusHandler = () => this._resumeAutoScroll("window-focus");
+    this._focusHandler = () => {
+      this._resumeAutoScroll("window-focus");
+      this._recoverRuntime("window-focus");
+    };
     this._visibilityHandler = () => {
-      if (!document.hidden) this._resumeAutoScroll("visibility-focus");
+      if (!document.hidden) {
+        this._resumeAutoScroll("visibility-focus");
+        this._recoverRuntime("visibility-focus");
+      }
     };
   }
 
@@ -297,6 +303,18 @@ class WeekPlannerPanel extends HTMLElement {
   _shouldAutoRepositionAfterRender() {
     const mode = this._effectiveScrollMode();
     return this._scrollState === "auto" && mode === "follow_now";
+  }
+
+  async _recoverRuntime(reason = "focus") {
+    if (!this._config || !this._hass) return;
+
+    try {
+      await this._handleDayRollover();
+      await this._setupCalendarSubscriptions();
+      await this._loadData(false);
+    } catch (err) {
+      console.warn(`Week Planner recovery failed (${reason})`, err);
+    }
   }
 
   _resumeAutoScroll(reason = "focus") {
@@ -604,14 +622,16 @@ class WeekPlannerPanel extends HTMLElement {
   async _loadHistoryData() {
     const sources = this._config?.history_sources || [];
     if (!sources.length) {
+      const changed = Object.keys(this._historyData || {}).length > 0;
       this._historyData = {};
-      return;
+      return { changed, ok: true };
     }
 
     const entityIds = [...new Set(sources.map((s) => s.entity_id).filter(Boolean))];
     if (!entityIds.length) {
+      const changed = Object.keys(this._historyData || {}).length > 0;
       this._historyData = {};
-      return;
+      return { changed, ok: true };
     }
 
     const start = new Date(this._weekStart);
@@ -639,10 +659,12 @@ class WeekPlannerPanel extends HTMLElement {
         }));
       }
 
+      const changed = this._stableJson(this._historyData || {}) !== this._stableJson(mapped);
       this._historyData = mapped;
+      return { changed, ok: true };
     } catch (err) {
-      this._historyData = {};
       this._warnings.push(`Historik kunne ikke hentes: ${err?.message || err}`);
+      return { changed: false, ok: false };
     }
   }
 
@@ -728,6 +750,7 @@ class WeekPlannerPanel extends HTMLElement {
 
   async _loadData(showLoading = true) {
     if (!this._hass || !this._config) return;
+
     if (showLoading) {
       this._loading = true;
       this._render();
@@ -735,8 +758,11 @@ class WeekPlannerPanel extends HTMLElement {
 
     const start = new Date(this._weekStart);
     const end = this._addDays(start, this._dayCount());
-    this._warnings = [];
-    let calendarError = null;
+    const previousWarnings = this._warnings || [];
+    const previousError = this._error || "";
+    const nextWarnings = [];
+    let nextError = "";
+    let changed = false;
 
     try {
       const calendars = this._config.calendar_entities || [];
@@ -753,36 +779,50 @@ class WeekPlannerPanel extends HTMLElement {
             target: { entity_id: calendars },
             return_response: true,
           });
-          this._events = calendarResult?.response || {};
+          const nextEvents = calendarResult?.response || {};
+          if (this._calendarDataChanged(nextEvents)) changed = true;
+          this._events = nextEvents;
         } catch (err) {
-          calendarError = err;
-          this._events = {};
+          nextError = `Kalenderdata kunne ikke hentes: ${err?.message || err}`;
+          // Last-known-good: keep this._events unchanged.
         }
-      } else {
+      } else if (Object.keys(this._events || {}).length) {
         this._events = {};
+        changed = true;
       }
 
-      const mode = this._weatherVisibleNow() ? (this._config.weather_display || "both") : "none";
+      const mode = this._weatherVisibleNow()
+        ? (this._config.weather_display || "both")
+        : "none";
+
       if (mode === "hourly" || mode === "both") {
         try {
-          this._hourlyWeather = await this._callForecast("hourly");
+          const nextHourly = await this._callForecast("hourly");
+          if (this._stableJson(this._hourlyWeather || []) !== this._stableJson(nextHourly || [])) {
+            changed = true;
+          }
+          this._hourlyWeather = nextHourly || [];
         } catch (err) {
-          this._hourlyWeather = [];
-          this._warnings.push(`Timevejr kunne ikke hentes: ${err?.message || err}`);
+          nextWarnings.push(`Timevejr kunne ikke hentes: ${err?.message || err}`);
         }
-      } else {
+      } else if ((this._hourlyWeather || []).length) {
         this._hourlyWeather = [];
+        changed = true;
       }
 
       if (mode === "daily" || mode === "both") {
         try {
-          this._dailyWeather = await this._callForecast("daily");
+          const nextDaily = await this._callForecast("daily");
+          if (this._stableJson(this._dailyWeather || []) !== this._stableJson(nextDaily || [])) {
+            changed = true;
+          }
+          this._dailyWeather = nextDaily || [];
         } catch (err) {
-          this._dailyWeather = [];
-          this._warnings.push(`Dagsvejr kunne ikke hentes: ${err?.message || err}`);
+          nextWarnings.push(`Dagsvejr kunne ikke hentes: ${err?.message || err}`);
         }
-      } else {
+      } else if ((this._dailyWeather || []).length) {
         this._dailyWeather = [];
+        changed = true;
       }
 
       if (this._config.show_sun_markers) {
@@ -790,7 +830,7 @@ class WeekPlannerPanel extends HTMLElement {
           const dates = Array.from({ length: this._dayCount() + 1 }, (_, i) =>
             this._dateKey(this._addDays(start, i - 1))
           );
-          this._sunTimes = await this._hass.callWS({
+          const nextSunTimes = await this._hass.callWS({
             type: "week_planner/sun_times",
             dates,
           }) || {};
@@ -798,46 +838,68 @@ class WeekPlannerPanel extends HTMLElement {
           const years = [...new Set(
             dates.map((value) => Number(value.slice(0, 4)))
           )];
-          this._daylightExtrema = await this._hass.callWS({
+          const nextExtrema = await this._hass.callWS({
             type: "week_planner/daylight_extrema",
             years,
           }) || {};
+
+          if (
+            this._stableJson(this._sunTimes || {}) !== this._stableJson(nextSunTimes) ||
+            this._stableJson(this._daylightExtrema || {}) !== this._stableJson(nextExtrema)
+          ) {
+            changed = true;
+          }
+
+          this._sunTimes = nextSunTimes;
+          this._daylightExtrema = nextExtrema;
         } catch (err) {
-          this._sunTimes = {};
-          this._daylightExtrema = {};
-          this._warnings.push(`Soltider kunne ikke hentes: ${err?.message || err}`);
+          nextWarnings.push(`Soltider kunne ikke hentes: ${err?.message || err}`);
         }
       } else {
+        if (Object.keys(this._sunTimes || {}).length || Object.keys(this._daylightExtrema || {}).length) {
+          changed = true;
+        }
         this._sunTimes = {};
         this._daylightExtrema = {};
       }
 
       if (this._config.show_moon_markers) {
         try {
-          this._moonTransitions = await this._hass.callWS({
+          const nextMoon = await this._hass.callWS({
             type: "week_planner/moon_transitions",
             start: this._isoLocal(start),
             end: this._isoLocal(end),
           }) || [];
+          if (this._stableJson(this._moonTransitions || []) !== this._stableJson(nextMoon)) {
+            changed = true;
+          }
+          this._moonTransitions = nextMoon;
         } catch (err) {
-          this._moonTransitions = [];
-          this._warnings.push(`Månefaseskift kunne ikke hentes: ${err?.message || err}`);
+          nextWarnings.push(`Månefaseskift kunne ikke hentes: ${err?.message || err}`);
         }
-      } else {
+      } else if ((this._moonTransitions || []).length) {
         this._moonTransitions = [];
+        changed = true;
       }
 
-      await this._loadHistoryData();
+      const historyResult = await this._loadHistoryData();
+      if (historyResult?.changed) changed = true;
 
-      this._error = calendarError
-        ? `Kalenderdata kunne ikke hentes: ${calendarError?.message || calendarError}`
-        : "";
     } catch (err) {
       console.error("Week Planner data load failed", err);
-      this._error = `Data kunne ikke hentes: ${err?.message || err}`;
+      nextError = `Data kunne ikke hentes: ${err?.message || err}`;
     } finally {
+      this._warnings = nextWarnings;
+      this._error = nextError;
       this._loading = false;
-      this._render();
+
+      const statusChanged =
+        previousError !== this._error ||
+        this._stableJson(previousWarnings) !== this._stableJson(this._warnings);
+
+      if (showLoading || changed || statusChanged) {
+        this._render();
+      }
     }
   }
 
@@ -3898,14 +3960,14 @@ if (!customElements.get("week-planner-card")) {
   customElements.define("week-planner-card", WeekPlannerCard);
 }
 
-window.weekPlannerFrontendVersion = "0.5.3-dev.8";
+window.weekPlannerFrontendVersion = "0.5.3-dev.9";
 window.customCards = window.customCards || [];
 
 if (!window.customCards.some((card) => card.type === "week-planner-card")) {
   window.customCards.push({
     type: "week-planner-card",
     name: "Week Planner Card",
-    description: "Week Planner dashboard card · frontend v0.5.3-dev.8",
+    description: "Week Planner dashboard card · frontend v0.5.3-dev.9",
     preview: false,
   });
 }
