@@ -40,6 +40,13 @@ class WeekPlannerPanel extends HTMLElement {
     this._scrollState = "auto";
     this._programmaticScrollUntil = 0;
     this._renderGeneration = 0;
+    this._sourceHealth = {};
+    this._runtimeHealth = {
+      status: "unknown",
+      last_success: null,
+      last_attempt: null,
+      last_error: "",
+    };
     this._settingsOpen = false;
     this._renderPendingWhileSettingsOpen = false;
     this._serverTimeOffsetMs = 0;
@@ -63,6 +70,99 @@ class WeekPlannerPanel extends HTMLElement {
 
   set panel(value) {
     this._panel = value;
+  }
+
+  _healthNowIso() {
+    try {
+      return this._now().toISOString();
+    } catch {
+      return new Date().toISOString();
+    }
+  }
+
+  _markSourceAttempt(key, label) {
+    const previous = this._sourceHealth[key] || {};
+    this._sourceHealth[key] = {
+      ...previous,
+      key,
+      label,
+      status: previous.status || "unknown",
+      last_attempt: this._healthNowIso(),
+    };
+  }
+
+  _markSourceSuccess(key, label) {
+    const now = this._healthNowIso();
+    this._sourceHealth[key] = {
+      ...(this._sourceHealth[key] || {}),
+      key,
+      label,
+      status: "fresh",
+      last_attempt: now,
+      last_success: now,
+      last_error: "",
+    };
+  }
+
+  _markSourceFailure(key, label, err) {
+    const previous = this._sourceHealth[key] || {};
+    this._sourceHealth[key] = {
+      ...previous,
+      key,
+      label,
+      status: previous.last_success ? "stale" : "error",
+      last_attempt: this._healthNowIso(),
+      last_error: String(err?.message || err || "Ukendt fejl"),
+    };
+  }
+
+  _activeHealthItems() {
+    const configured = [];
+    const calendars = this._config?.calendar_entities || [];
+    if (calendars.length) configured.push(["calendar", "Kalendere"]);
+    if (this._config?.weather_entity && this._config?.weather_display !== "none") configured.push(["weather", "Vejr"]);
+    if (this._config?.show_sun_markers) configured.push(["sun", "Sol/dagslængde"]);
+    if (this._config?.show_moon_markers) configured.push(["moon", "Månefaser"]);
+    if ((this._config?.history_sources || []).length) configured.push(["history", "Historik"]);
+    if (this._config?.show_energy_prices && this._config?.energy_entity) configured.push(["energy", "Elpriser"]);
+
+    const runtime = {
+      key: "runtime",
+      label: "Home Assistant / Week Planner",
+      ...(this._runtimeHealth || {}),
+    };
+
+    return [
+      runtime,
+      ...configured.map(([key, label]) => ({
+        key,
+        label,
+        status: "unknown",
+        ...(this._sourceHealth[key] || {}),
+      })),
+    ];
+  }
+
+  _healthIconMarkup() {
+    const problematic = this._activeHealthItems().filter(
+      (item) => item.status === "stale" || item.status === "error"
+    );
+    if (!problematic.length) return "";
+
+    return problematic.map((item) => {
+      const lastSuccess = item.last_success
+        ? new Date(item.last_success).toLocaleString("da-DK")
+        : "aldrig";
+      const lastAttempt = item.last_attempt
+        ? new Date(item.last_attempt).toLocaleString("da-DK")
+        : "ukendt";
+      const state = item.status === "error" ? "Fejl" : "Ikke synkroniseret";
+      const title =
+        `${item.label}: ${state}. Sidst OK: ${lastSuccess}. `
+        + `Seneste forsøg: ${lastAttempt}`
+        + (item.last_error ? `. Fejl: ${item.last_error}` : "");
+      return `<span class="health-indicator ${item.status}" title="${this._escape(title)}" aria-label="${this._escape(title)}">⚠</span>`;
+    }).join("");
   }
 
   _dayKey(date = this._now()) {
@@ -192,6 +292,10 @@ class WeekPlannerPanel extends HTMLElement {
     document.removeEventListener("visibilitychange", this._visibilityHandler);
     this._stopRuntimeTimers();
     this._clearCalendarSubscriptions();
+    if (this._initializeRetryTimer) {
+      clearTimeout(this._initializeRetryTimer);
+      this._initializeRetryTimer = null;
+    }
   }
 
   _applyViewportHeight() {
@@ -204,6 +308,7 @@ class WeekPlannerPanel extends HTMLElement {
   async _initialize() {
     if (!this._hass || this._initializing) return;
     this._initializing = true;
+    this._runtimeHealth.last_attempt = this._healthNowIso();
     this._initialScrolled = false;
     this._scrollState = "auto";
     this._scrollPositioned = false;
@@ -245,10 +350,24 @@ class WeekPlannerPanel extends HTMLElement {
 
       this._lastKnownDayKey = this._dayKey(this._now());
       this._startRuntimeTimers();
+      this._runtimeHealth = {
+        status: "fresh",
+        last_success: this._healthNowIso(),
+        last_attempt: this._healthNowIso(),
+        last_error: "",
+      };
     } catch (err) {
+      this._runtimeHealth = {
+        ...(this._runtimeHealth || {}),
+        status: this._runtimeHealth?.last_success ? "stale" : "error",
+        last_attempt: this._healthNowIso(),
+        last_error: String(err?.message || err),
+      };
       this._error = `Kunne ikke initialisere Week Planner: ${err?.message || err}`;
       this._loading = false;
       this._render();
+    } finally {
+      this._initializing = false;
     }
   }
 
@@ -306,14 +425,32 @@ class WeekPlannerPanel extends HTMLElement {
   }
 
   async _recoverRuntime(reason = "focus") {
-    if (!this._config || !this._hass) return;
+    if (!this._hass) return;
+    if (!this._config) {
+      if (!this._initializing) await this._initialize();
+      return;
+    }
 
+    this._runtimeHealth.last_attempt = this._healthNowIso();
     try {
       await this._handleDayRollover();
       await this._setupCalendarSubscriptions();
       await this._loadData(false);
+      this._runtimeHealth = {
+        status: "fresh",
+        last_success: this._healthNowIso(),
+        last_attempt: this._healthNowIso(),
+        last_error: "",
+      };
     } catch (err) {
+      this._runtimeHealth = {
+        ...(this._runtimeHealth || {}),
+        status: this._runtimeHealth?.last_success ? "stale" : "error",
+        last_attempt: this._healthNowIso(),
+        last_error: String(err?.message || err),
+      };
       console.warn(`Week Planner recovery failed (${reason})`, err);
+      this._render(false);
     }
   }
 
@@ -1229,14 +1366,25 @@ class WeekPlannerPanel extends HTMLElement {
       this._renderPendingWhileSettingsOpen = true;
       return;
     }
-    if (!this._config && !this._error) {
-      const existingScroll = this.shadowRoot.getElementById("scroll");
-    if (existingScroll && this._initialScrolled) {
-      this._savedScrollTop = existingScroll.scrollTop;
-      this._savedScrollLeft = existingScroll.scrollLeft;
-    }
+    if (!this._config) {
+      const message = this._error
+        ? this._escape(this._error)
+        : "Indlæser Week Planner…";
 
-    this.shadowRoot.innerHTML = `<div class="state">Indlæser Week Planner…</div>`;
+      this.shadowRoot.innerHTML = `
+        <style>
+          :host { display:block; width:100%; height:100%; background:var(--primary-background-color); color:var(--primary-text-color); }
+          .state { min-height:320px; display:flex; align-items:center; justify-content:center; padding:24px; text-align:center; }
+        </style>
+        <div class="state">${message}</div>
+      `;
+
+      // A failed initialization must be self-healing. Retry on a modest delay
+      // instead of requiring a kiosk/browser reload.
+      if (this._hass && !this._initializing) {
+        clearTimeout(this._initializeRetryTimer);
+        this._initializeRetryTimer = setTimeout(() => this._initialize(), 15000);
+      }
       return;
     }
 
@@ -1291,7 +1439,16 @@ class WeekPlannerPanel extends HTMLElement {
         border-radius:10px; padding:8px 12px; cursor:pointer;
       }
       button:hover { background:rgba(127,127,127,.10); }
-      .nav { display:flex; gap:8px; }
+      .nav { display:flex; gap:8px; align-items:center; }
+      .health-strip { display:flex; align-items:center; gap:4px; margin-right:2px; }
+      .health-indicator {
+        display:inline-flex; align-items:center; justify-content:center;
+        width:28px; height:28px; border-radius:8px;
+        border:1px solid var(--wp-border);
+        font-size:16px; cursor:help;
+      }
+      .health-indicator.stale { opacity:.85; }
+      .health-indicator.error { font-weight:700; }
       .nav .layer-toggle { min-width:34px; padding:6px 8px; }
       .nav .layer-toggle.off { opacity:.4; filter:grayscale(1); }
       .nav .layer-toggle.active { opacity:1; }
@@ -2038,6 +2195,7 @@ class WeekPlannerPanel extends HTMLElement {
               <div class="sub">${this._weekLabel()}</div>
             </div>
             <div class="nav">
+              <div class="health-strip" id="healthStrip">${this._healthIconMarkup()}</div>
               <button id="configure" title="Skift vejr og kalendere">⚙ Konfigurer</button>
             ${this._config?.weather_display && this._config.weather_display !== "none"
               ? `<button id="toggleWeather" class="layer-toggle ${this._weatherVisibleNow() ? "active" : "off"}" title="Vis/skjul vejr">☁</button>`
@@ -3960,14 +4118,14 @@ if (!customElements.get("week-planner-card")) {
   customElements.define("week-planner-card", WeekPlannerCard);
 }
 
-window.weekPlannerFrontendVersion = "0.5.3-dev.9";
+window.weekPlannerFrontendVersion = "0.5.3-dev.10";
 window.customCards = window.customCards || [];
 
 if (!window.customCards.some((card) => card.type === "week-planner-card")) {
   window.customCards.push({
     type: "week-planner-card",
     name: "Week Planner Card",
-    description: "Week Planner dashboard card · frontend v0.5.3-dev.9",
+    description: "Week Planner dashboard card · frontend v0.5.3-dev.10",
     preview: false,
   });
 }
