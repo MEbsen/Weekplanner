@@ -790,3 +790,13 @@ Removing the Week Planner integration removes its managed dashboard/resource.
 - Failed refreshes no longer clear the dashboard to empty state.
 - Rendering is skipped when neither data nor error/status state changed.
 - Focus/visibility recovery now retries day rollover, calendar subscriptions and data refresh without requiring a kiosk/browser reload.
+
+
+## 0.5.3-dev.11 — Self-healing runtime and source health
+
+- Fixed a blank-screen recovery bug where failed initialization could leave the planner with no config and permanently block future initialization attempts.
+- Failed initialization is now retryable and shows a safe fallback state instead of throwing during render.
+- Added runtime recovery on focus/visibility changes.
+- Added shared source-health tracking for Home Assistant runtime, calendars, weather, sun/daylight, moon, history, and energy prices.
+- Stale/error sources are surfaced as warning icons in the top toolbar, immediately left of the Configure button.
+- Hovering a warning icon shows source name, status, last successful sync, last attempt, and last error.
