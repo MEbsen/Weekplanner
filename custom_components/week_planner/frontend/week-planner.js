@@ -658,6 +658,7 @@ class WeekPlannerPanel extends HTMLElement {
     }
 
     try {
+      this._markSourceAttempt("calendar", "Kalendere");
       const calendarResult = await this._hass.callWS({
         type: "call_service",
         domain: "calendar",
@@ -670,6 +671,7 @@ class WeekPlannerPanel extends HTMLElement {
         return_response: true,
       });
       const nextEvents = calendarResult?.response || {};
+      this._markSourceSuccess("calendar", "Kalendere");
       const changed = this._calendarDataChanged(nextEvents);
 
       this._events = nextEvents;
@@ -679,6 +681,7 @@ class WeekPlannerPanel extends HTMLElement {
         this._render(false);
       }
     } catch (err) {
+      this._markSourceFailure("calendar", "Kalendere", err);
       if (showError) {
         this._error = `Kalenderdata kunne ikke hentes: ${err?.message || err}`;
         this._render(false);
@@ -779,6 +782,7 @@ class WeekPlannerPanel extends HTMLElement {
       + `&end_time=${encodeURIComponent(this._isoLocal(end))}`;
 
     try {
+      this._markSourceAttempt("history", "Historik");
       const response = await this._hass.callApi("GET", path);
       const mapped = {};
 
@@ -798,8 +802,10 @@ class WeekPlannerPanel extends HTMLElement {
 
       const changed = this._stableJson(this._historyData || {}) !== this._stableJson(mapped);
       this._historyData = mapped;
+      this._markSourceSuccess("history", "Historik");
       return { changed, ok: true };
     } catch (err) {
+      this._markSourceFailure("history", "Historik", err);
       this._warnings.push(`Historik kunne ikke hentes: ${err?.message || err}`);
       return { changed: false, ok: false };
     }
@@ -897,6 +903,10 @@ class WeekPlannerPanel extends HTMLElement {
     const end = this._addDays(start, this._dayCount());
     const previousWarnings = this._warnings || [];
     const previousError = this._error || "";
+    const previousHealth = this._stableJson({
+      runtime: this._runtimeHealth,
+      sources: this._sourceHealth,
+    });
     const nextWarnings = [];
     let nextError = "";
     let changed = false;
@@ -905,6 +915,7 @@ class WeekPlannerPanel extends HTMLElement {
       const calendars = this._config.calendar_entities || [];
       if (calendars.length) {
         try {
+          this._markSourceAttempt("calendar", "Kalendere");
           const calendarResult = await this._hass.callWS({
             type: "call_service",
             domain: "calendar",
@@ -917,9 +928,11 @@ class WeekPlannerPanel extends HTMLElement {
             return_response: true,
           });
           const nextEvents = calendarResult?.response || {};
+          this._markSourceSuccess("calendar", "Kalendere");
           if (this._calendarDataChanged(nextEvents)) changed = true;
           this._events = nextEvents;
         } catch (err) {
+          this._markSourceFailure("calendar", "Kalendere", err);
           nextError = `Kalenderdata kunne ikke hentes: ${err?.message || err}`;
           // Last-known-good: keep this._events unchanged.
         }
@@ -934,12 +947,15 @@ class WeekPlannerPanel extends HTMLElement {
 
       if (mode === "hourly" || mode === "both") {
         try {
+          this._markSourceAttempt("weather", "Vejr");
           const nextHourly = await this._callForecast("hourly");
           if (this._stableJson(this._hourlyWeather || []) !== this._stableJson(nextHourly || [])) {
             changed = true;
           }
           this._hourlyWeather = nextHourly || [];
+          this._markSourceSuccess("weather", "Vejr");
         } catch (err) {
+          this._markSourceFailure("weather", "Vejr", err);
           nextWarnings.push(`Timevejr kunne ikke hentes: ${err?.message || err}`);
         }
       } else if ((this._hourlyWeather || []).length) {
@@ -949,12 +965,15 @@ class WeekPlannerPanel extends HTMLElement {
 
       if (mode === "daily" || mode === "both") {
         try {
+          this._markSourceAttempt("weather", "Vejr");
           const nextDaily = await this._callForecast("daily");
           if (this._stableJson(this._dailyWeather || []) !== this._stableJson(nextDaily || [])) {
             changed = true;
           }
           this._dailyWeather = nextDaily || [];
+          this._markSourceSuccess("weather", "Vejr");
         } catch (err) {
+          this._markSourceFailure("weather", "Vejr", err);
           nextWarnings.push(`Dagsvejr kunne ikke hentes: ${err?.message || err}`);
         }
       } else if ((this._dailyWeather || []).length) {
@@ -964,6 +983,7 @@ class WeekPlannerPanel extends HTMLElement {
 
       if (this._config.show_sun_markers) {
         try {
+          this._markSourceAttempt("sun", "Sol/dagslængde");
           const dates = Array.from({ length: this._dayCount() + 1 }, (_, i) =>
             this._dateKey(this._addDays(start, i - 1))
           );
@@ -989,7 +1009,9 @@ class WeekPlannerPanel extends HTMLElement {
 
           this._sunTimes = nextSunTimes;
           this._daylightExtrema = nextExtrema;
+          this._markSourceSuccess("sun", "Sol/dagslængde");
         } catch (err) {
+          this._markSourceFailure("sun", "Sol/dagslængde", err);
           nextWarnings.push(`Soltider kunne ikke hentes: ${err?.message || err}`);
         }
       } else {
@@ -1002,6 +1024,7 @@ class WeekPlannerPanel extends HTMLElement {
 
       if (this._config.show_moon_markers) {
         try {
+          this._markSourceAttempt("moon", "Månefaser");
           const nextMoon = await this._hass.callWS({
             type: "week_planner/moon_transitions",
             start: this._isoLocal(start),
@@ -1011,7 +1034,9 @@ class WeekPlannerPanel extends HTMLElement {
             changed = true;
           }
           this._moonTransitions = nextMoon;
+          this._markSourceSuccess("moon", "Månefaser");
         } catch (err) {
+          this._markSourceFailure("moon", "Månefaser", err);
           nextWarnings.push(`Månefaseskift kunne ikke hentes: ${err?.message || err}`);
         }
       } else if ((this._moonTransitions || []).length) {
@@ -1021,6 +1046,22 @@ class WeekPlannerPanel extends HTMLElement {
 
       const historyResult = await this._loadHistoryData();
       if (historyResult?.changed) changed = true;
+
+      if (this._config?.show_energy_prices && this._config?.energy_entity) {
+        this._markSourceAttempt("energy", "Elpriser");
+        const entityId = this._config.energy_entity;
+        const state = this._hass?.states?.[entityId];
+        const compatibility = this._energyCompatibility();
+        if (!state || state.state === "unknown" || state.state === "unavailable" || !compatibility.ok) {
+          this._markSourceFailure(
+            "energy",
+            "Elpriser",
+            compatibility.text || `Entity ${entityId} er ikke tilgængelig`
+          );
+        } else {
+          this._markSourceSuccess("energy", "Elpriser");
+        }
+      }
 
     } catch (err) {
       console.error("Week Planner data load failed", err);
@@ -1032,7 +1073,11 @@ class WeekPlannerPanel extends HTMLElement {
 
       const statusChanged =
         previousError !== this._error ||
-        this._stableJson(previousWarnings) !== this._stableJson(this._warnings);
+        this._stableJson(previousWarnings) !== this._stableJson(this._warnings) ||
+        previousHealth !== this._stableJson({
+          runtime: this._runtimeHealth,
+          sources: this._sourceHealth,
+        });
 
       if (showLoading || changed || statusChanged) {
         this._render();
@@ -4118,14 +4163,14 @@ if (!customElements.get("week-planner-card")) {
   customElements.define("week-planner-card", WeekPlannerCard);
 }
 
-window.weekPlannerFrontendVersion = "0.5.3-dev.10";
+window.weekPlannerFrontendVersion = "0.5.3-dev.11";
 window.customCards = window.customCards || [];
 
 if (!window.customCards.some((card) => card.type === "week-planner-card")) {
   window.customCards.push({
     type: "week-planner-card",
     name: "Week Planner Card",
-    description: "Week Planner dashboard card · frontend v0.5.3-dev.10",
+    description: "Week Planner dashboard card · frontend v0.5.3-dev.11",
     preview: false,
   });
 }
