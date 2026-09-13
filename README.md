@@ -782,3 +782,11 @@ Removing the Week Planner integration removes its managed dashboard/resource.
 - Data refreshes preserve the current scroll position and never trigger automatic repositioning.
 - First load, panel focus, and hourly changes re-evaluate day focus only while in AUTO.
 - The behavior is shared by the native dashboard and the Week Planner card.
+
+
+## 0.5.3-dev.9 — Last-known-good runtime stability
+
+- Data refreshes now preserve the last known good calendar, weather, sun, moon and history data if Home Assistant or the network fails temporarily.
+- Failed refreshes no longer clear the dashboard to empty state.
+- Rendering is skipped when neither data nor error/status state changed.
+- Focus/visibility recovery now retries day rollover, calendar subscriptions and data refresh without requiring a kiosk/browser reload.
