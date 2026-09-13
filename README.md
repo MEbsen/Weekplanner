@@ -800,3 +800,9 @@ Removing the Week Planner integration removes its managed dashboard/resource.
 - Added shared source-health tracking for Home Assistant runtime, calendars, weather, sun/daylight, moon, history, and energy prices.
 - Stale/error sources are surfaced as warning icons in the top toolbar, immediately left of the Configure button.
 - Hovering a warning icon shows source name, status, last successful sync, last attempt, and last error.
+
+### Dataflow and source health
+
+![Week Planner dataflow and health architecture](docs/week-planner-dataflow-health.svg)
+
+The diagram documents the runtime triggers, configured data sources, last-known-good behavior, source-health states, and the shared panel/card UI flow introduced during the 0.5.3-dev.11 stability work.
