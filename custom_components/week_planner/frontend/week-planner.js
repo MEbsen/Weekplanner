@@ -3564,11 +3564,30 @@ class WeekPlannerCard extends WeekPlannerPanel {
         : "fixed",
     };
 
-    this._initialScrolled = false;
-    this._scrollState = "auto";
-    this._scrollPositioned = false;
-    this._scrollRequestId++;
-    this._savedScrollTop = null;
+    // Lovelace may call setConfig repeatedly with the same effective
+    // configuration. Do not treat that as a new card lifecycle: preserving
+    // scroll state prevents ordinary HA updates from jumping the card to top.
+    const previousScrollSignature = this._lastCardScrollSignature || null;
+    const nextScrollSignature = JSON.stringify({
+      scroll_mode: this._cardConfig.scroll_mode,
+      default_scroll_hour: this._cardConfig.default_scroll_hour,
+      days_to_show: this._cardConfig.days_to_show,
+      height: this._cardConfig.height,
+      adopt_panel: this._cardConfig.adopt_panel,
+    });
+    const scrollConfigChanged =
+      previousScrollSignature !== null &&
+      previousScrollSignature !== nextScrollSignature;
+    const firstCardConfig = previousScrollSignature === null;
+    this._lastCardScrollSignature = nextScrollSignature;
+
+    if (firstCardConfig || scrollConfigChanged) {
+      this._initialScrolled = false;
+      this._scrollState = "auto";
+      this._scrollPositioned = false;
+      this._scrollRequestId++;
+      this._savedScrollTop = null;
+    }
 
     this._applyViewportHeight();
 
@@ -3618,7 +3637,7 @@ class WeekPlannerCard extends WeekPlannerPanel {
       enlarge_today: this._cardConfig.enlarge_today !== false,
       view_mode: "rolling",
       default_scroll_hour: Number(this._cardConfig.default_scroll_hour ?? 6),
-      scroll_mode: "fixed",
+      scroll_mode: this._cardConfig.scroll_mode || "fixed",
     };
   }
 
@@ -4163,14 +4182,14 @@ if (!customElements.get("week-planner-card")) {
   customElements.define("week-planner-card", WeekPlannerCard);
 }
 
-window.weekPlannerFrontendVersion = "0.5.3-dev.11";
+window.weekPlannerFrontendVersion = "0.5.3-dev.12";
 window.customCards = window.customCards || [];
 
 if (!window.customCards.some((card) => card.type === "week-planner-card")) {
   window.customCards.push({
     type: "week-planner-card",
     name: "Week Planner Card",
-    description: "Week Planner dashboard card · frontend v0.5.3-dev.11",
+    description: "Week Planner dashboard card · frontend v0.5.3-dev.12",
     preview: false,
   });
 }
