@@ -772,3 +772,11 @@ Removing the Week Planner integration removes its managed dashboard/resource.
 - Minute updates now move only the current-time indicator instead of re-rendering the whole planner.
 - Follow NOW repositions only on initial load and when the hour changes.
 - Manual scrolling is therefore no longer overridden every minute.
+
+## Automated releases
+
+Releases are created by GitHub Actions. Complete and validate all changes first,
+then update `version` in `custom_components/week_planner/manifest.json`. The
+final version commit must use the exact message `Release vX.Y.Z`. The workflow
+checks the manifest, Python syntax and HACS compliance before creating a new tag
+and GitHub Release. Existing tags are never overwritten.
