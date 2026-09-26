@@ -6,9 +6,6 @@ text = PATH.read_text(encoding="utf-8")
 
 
 def remove_method(source: str, name: str) -> str:
-    # WeekPlanner core methods are consistently indented two spaces. Removing
-    # from the named method header to the next class method avoids trying to
-    # parse JavaScript/template-literal braces in a migration script.
     start_match = re.search(rf"(?m)^  (?:async )?{re.escape(name)}\([^\n]*\) \{{\n", source)
     if not start_match:
         print(f"method already absent: {name}")
@@ -43,6 +40,27 @@ legacy_render_block = '''    // Rendering is never allowed to decide where the u
 '''
 text = text.replace(legacy_render_block, "", 1)
 
+# Keep horizontal header synchronization in core presentation code, but remove
+# the old controller's manual-override state mutation. ScrollController now
+# installs the authoritative manual-scroll listener after every render.
+legacy_listener = '''      timelineScroll.addEventListener("scroll", () => {
+        if (this._scrollPositioned && Date.now() > this._programmaticScrollUntil) {
+          this._savedScrollTop = timelineScroll.scrollTop;
+          this._savedScrollLeft = timelineScroll.scrollLeft;
+          this._scrollState = "manual";
+          this._scrollRequestId++;
+        }
+        headerScroll.scrollLeft = timelineScroll.scrollLeft;
+      }, { passive:true });
+'''
+service_neutral_listener = '''      timelineScroll.addEventListener("scroll", () => {
+        headerScroll.scrollLeft = timelineScroll.scrollLeft;
+      }, { passive:true });
+'''
+if legacy_listener in text:
+    text = text.replace(legacy_listener, service_neutral_listener, 1)
+    print("removed legacy manual-scroll listener state")
+
 legacy_fields = (
     "_initialScrolled",
     "_scrollPositioned",
@@ -53,8 +71,6 @@ legacy_fields = (
     "_programmaticScrollUntil",
 )
 
-# Remaining occurrences outside removed methods are lifecycle resets belonging
-# to the old controller. They are simple single-line assignments/increments.
 lines = []
 for line in text.splitlines(keepends=True):
     if any(f"this.{field}" in line for field in legacy_fields):
@@ -67,8 +83,6 @@ for field in legacy_fields:
     if f"this.{field}" in text:
         raise RuntimeError(f"legacy scroll state still referenced: {field}")
 
-# The public/service hooks must remain: core lifecycle calls these dynamically,
-# and scroll-integration supplies their service-backed implementations.
 for required in ("this._positionScroll(", "this._resumeAutoScroll("):
     if required not in text:
         raise RuntimeError(f"expected service hook call missing: {required}")
