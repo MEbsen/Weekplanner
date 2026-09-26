@@ -18,15 +18,15 @@ def remove_method(source: str, name: str) -> str:
     return source[:start_match.start()] + source[end:]
 
 
-# Remove legacy state ownership from the panel constructor.
-text = text.replace('''    this._sourceHealth = {};
-    this._runtimeHealth = {
-      status: "unknown",
-      last_success: null,
-      last_attempt: null,
-      last_error: "",
-    };
-''', "", 1)
+# Remove legacy state ownership wherever a panel/card constructor reset it.
+text, source_resets = re.subn(r"(?m)^\s*this\._sourceHealth = \{\};\n", "", text)
+text, runtime_resets = re.subn(
+    r'''(?m)^\s*this\._runtimeHealth = \{\n\s*status: "unknown",\n\s*last_success: null,\n\s*last_attempt: null,\n\s*last_error: "",\n\s*\};\n''',
+    "",
+    text,
+)
+print(f"removed source state resets: {source_resets}")
+print(f"removed runtime state resets: {runtime_resets}")
 
 # These methods are supplied by source-health-integration.js after core loads.
 for method in (
