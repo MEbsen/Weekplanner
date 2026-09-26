@@ -27,15 +27,13 @@ jobs:
           echo $? > refactor-cleanup.exit
           cat refactor-cleanup.log
           exit 0
-      - name: Check syntax
+      - name: Check refactored core syntax
         run: |
           set +e
           : > refactor-syntax.log
           if [ "$(cat refactor-cleanup.exit)" = "0" ]; then
             node --check custom_components/week_planner/frontend/week-planner-core.js >> refactor-syntax.log 2>&1
             STATUS=$?
-            node --check custom_components/week_planner/frontend/services/scroll-controller.js >> refactor-syntax.log 2>&1 || STATUS=$?
-            node --check custom_components/week_planner/frontend/services/scroll-integration.js >> refactor-syntax.log 2>&1 || STATUS=$?
           else
             STATUS=99
           fi
@@ -54,5 +52,5 @@ jobs:
             git add custom_components/week_planner/frontend/week-planner-core.js
           fi
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m "Record legacy scroll cleanup result"
+          git commit -m "Remove bypassed legacy scroll implementation"
           git push origin HEAD:cleanup/legacy-scroll-dev16
