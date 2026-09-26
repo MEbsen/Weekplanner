@@ -17,30 +17,28 @@ jobs:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout refactor branch
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: cleanup/legacy-scroll-dev16
-
-      - name: Remove bypassed legacy scroll implementation
-        run: python scripts/refactor_legacy_scroll.py
-
-      - name: Verify service modules and syntax
+      - name: Run cleanup and capture diagnostics
         run: |
-          test -f custom_components/week_planner/frontend/services/scroll-controller.js
-          test -f custom_components/week_planner/frontend/services/scroll-integration.js
-          node --check custom_components/week_planner/frontend/week-planner-core.js
-          node --check custom_components/week_planner/frontend/services/scroll-controller.js
-          node --check custom_components/week_planner/frontend/services/scroll-integration.js
-
-      - name: Commit cleanup
+          set +e
+          python scripts/refactor_legacy_scroll.py > refactor-cleanup.log 2>&1
+          echo $? > refactor-cleanup.exit
+          cat refactor-cleanup.log
+          exit 0
+      - name: Verify syntax when cleanup succeeded
         run: |
-          if git diff --quiet; then
-            echo "No cleanup changes required"
-            exit 0
+          if [ "$(cat refactor-cleanup.exit)" = "0" ]; then
+            node --check custom_components/week_planner/frontend/week-planner-core.js
+            node --check custom_components/week_planner/frontend/services/scroll-controller.js
+            node --check custom_components/week_planner/frontend/services/scroll-integration.js
           fi
+      - name: Commit result and diagnostics
+        run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add custom_components/week_planner/frontend/week-planner-core.js
-          git commit -m "Remove bypassed legacy scroll implementation"
+          git add custom_components/week_planner/frontend/week-planner-core.js refactor-cleanup.log refactor-cleanup.exit
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Apply legacy scroll cleanup"
           git push origin HEAD:cleanup/legacy-scroll-dev16
