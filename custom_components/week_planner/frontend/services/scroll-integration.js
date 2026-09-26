@@ -110,4 +110,4 @@ patchPlannerPrototype(PanelClass.prototype);
 // own render/config methods may run additional presentation logic, but scroll
 // semantics remain identical because all positioning routes through the same
 // service.
-window.weekPlannerScrollServiceVersion = "0.5.3-dev.13";
+window.weekPlannerScrollServiceVersion = "0.5.3-dev.15";
