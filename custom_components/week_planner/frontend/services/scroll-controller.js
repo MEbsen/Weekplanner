@@ -138,15 +138,24 @@ export class WeekPlannerScrollController {
 
   onDayChange() {
     this.requestId++;
-    if (this.mode() === ScrollMode.NONE) return;
-    if (this.state === ScrollState.MANUAL_OVERRIDE && Date.now() < this.manualUntil) {
-      this._scheduleReturn();
+
+    // A new calendar day is an explicit lifecycle boundary for automatic
+    // modes. Yesterday's viewport (including an active five-minute manual
+    // override) must never leak into the new day. Re-evaluate FOLLOW_NOW or
+    // FIXED immediately against the new day's DOM.
+    if (this.mode() === ScrollMode.NONE) {
+      // NONE means the user owns the viewport, so preserve it across midnight.
+      this._notify("day-change-static");
+      this.position("day-change-static", true);
       return;
     }
+
+    this._clearReturnTimer();
     this.state = ScrollState.AUTO;
     this.manualUntil = 0;
     this.savedTop = null;
-    this._clearReturnTimer();
+    this.savedLeft = 0;
+    this._notify("day-change");
     this.position("day-change", true);
   }
 
