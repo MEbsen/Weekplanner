@@ -40,6 +40,7 @@ jobs:
           echo ${STATUS:-0} > refactor-syntax.exit
           cat refactor-syntax.log
           if [ "${STATUS:-0}" != "0" ]; then
+            cp custom_components/week_planner/frontend/week-planner-core.js refactor-candidate.js
             git checkout -- custom_components/week_planner/frontend/week-planner-core.js
           fi
           exit 0
@@ -48,9 +49,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add refactor-cleanup.log refactor-cleanup.exit refactor-syntax.log refactor-syntax.exit
+          if [ -f refactor-candidate.js ]; then git add refactor-candidate.js; fi
           if [ "$(cat refactor-cleanup.exit)" = "0" ] && [ "$(cat refactor-syntax.exit)" = "0" ]; then
             git add custom_components/week_planner/frontend/week-planner-core.js
           fi
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m "Remove bypassed legacy scroll implementation"
+          git commit -m "Record legacy scroll cleanup candidate"
           git push origin HEAD:cleanup/legacy-scroll-dev16
