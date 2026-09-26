@@ -2161,7 +2161,6 @@ class WeekPlannerPanel extends HTMLElement {
     const timelineScroll = this.shadowRoot.getElementById("scroll");
     if (headerScroll && timelineScroll) {
       timelineScroll.addEventListener("scroll", () => {
-        }
         headerScroll.scrollLeft = timelineScroll.scrollLeft;
       }, { passive:true });
     }

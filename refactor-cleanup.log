@@ -2,6 +2,7 @@ removed method: _scrollTargetForMode
 removed method: _shouldAutoRepositionAfterRender
 removed method: _resumeAutoScroll
 removed method: _positionScroll
+removed legacy manual-scroll listener state
 removed legacy state line: this._initialScrolled = false;
 removed legacy state line: this._scrollPositioned = false;
 removed legacy state line: this._scrollRequestId = 0;
@@ -23,11 +24,6 @@ removed legacy state line: this._scrollPositioned = false;
 removed legacy state line: this._scrollRequestId++;
 removed legacy state line: this._savedScrollTop = null;
 removed legacy state line: this._savedScrollLeft = 0;
-removed legacy state line: if (this._scrollPositioned && Date.now() > this._programmaticScrollUntil) {
-removed legacy state line: this._savedScrollTop = timelineScroll.scrollTop;
-removed legacy state line: this._savedScrollLeft = timelineScroll.scrollLeft;
-removed legacy state line: this._scrollState = "manual";
-removed legacy state line: this._scrollRequestId++;
 removed legacy state line: this._initialScrolled = true;
 removed legacy state line: this._initialScrolled = true;
 removed legacy state line: if (this._scrollState === "manual") {
@@ -53,4 +49,4 @@ removed legacy state line: this._scrollState = "auto";
 removed legacy state line: this._scrollPositioned = false;
 removed legacy state line: this._scrollRequestId++;
 removed legacy state line: this._savedScrollTop = null;
-wrote custom_components/week_planner/frontend/week-planner-core.js (152522 chars)
+wrote custom_components/week_planner/frontend/week-planner-core.js (152512 chars)
