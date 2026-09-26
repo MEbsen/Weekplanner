@@ -3,6 +3,8 @@ method already absent: _shouldAutoRepositionAfterRender
 method already absent: _resumeAutoScroll
 method already absent: _positionScroll
 wrote custom_components/week_planner/frontend/week-planner-core.js (149844 chars)
+removed source state resets: 1
+removed runtime state resets: 1
 removed method: _healthNowIso
 removed method: _markSourceAttempt
 removed method: _markSourceSuccess
