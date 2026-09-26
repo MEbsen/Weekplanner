@@ -20,25 +20,39 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: cleanup/legacy-scroll-dev16
-      - name: Run cleanup and capture diagnostics
+      - name: Run cleanup
         run: |
           set +e
           python scripts/refactor_legacy_scroll.py > refactor-cleanup.log 2>&1
           echo $? > refactor-cleanup.exit
           cat refactor-cleanup.log
           exit 0
-      - name: Verify syntax when cleanup succeeded
+      - name: Check syntax
         run: |
+          set +e
+          : > refactor-syntax.log
           if [ "$(cat refactor-cleanup.exit)" = "0" ]; then
-            node --check custom_components/week_planner/frontend/week-planner-core.js
-            node --check custom_components/week_planner/frontend/services/scroll-controller.js
-            node --check custom_components/week_planner/frontend/services/scroll-integration.js
+            node --check custom_components/week_planner/frontend/week-planner-core.js >> refactor-syntax.log 2>&1
+            STATUS=$?
+            node --check custom_components/week_planner/frontend/services/scroll-controller.js >> refactor-syntax.log 2>&1 || STATUS=$?
+            node --check custom_components/week_planner/frontend/services/scroll-integration.js >> refactor-syntax.log 2>&1 || STATUS=$?
+          else
+            STATUS=99
           fi
-      - name: Commit result and diagnostics
+          echo ${STATUS:-0} > refactor-syntax.exit
+          cat refactor-syntax.log
+          if [ "${STATUS:-0}" != "0" ]; then
+            git checkout -- custom_components/week_planner/frontend/week-planner-core.js
+          fi
+          exit 0
+      - name: Commit safe result and diagnostics
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add custom_components/week_planner/frontend/week-planner-core.js refactor-cleanup.log refactor-cleanup.exit
+          git add refactor-cleanup.log refactor-cleanup.exit refactor-syntax.log refactor-syntax.exit
+          if [ "$(cat refactor-cleanup.exit)" = "0" ] && [ "$(cat refactor-syntax.exit)" = "0" ]; then
+            git add custom_components/week_planner/frontend/week-planner-core.js
+          fi
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m "Apply legacy scroll cleanup"
+          git commit -m "Record legacy scroll cleanup result"
           git push origin HEAD:cleanup/legacy-scroll-dev16
