@@ -18,12 +18,7 @@ def remove_method(source: str, name: str) -> str:
     return source[:start_match.start()] + source[end:]
 
 
-for method in (
-    "_scrollTargetForMode",
-    "_shouldAutoRepositionAfterRender",
-    "_resumeAutoScroll",
-    "_positionScroll",
-):
+for method in ("_scrollTargetForMode", "_shouldAutoRepositionAfterRender", "_resumeAutoScroll", "_positionScroll"):
     text = remove_method(text, method)
 
 legacy_render_block = '''    // Rendering is never allowed to decide where the user should be.
@@ -40,9 +35,6 @@ legacy_render_block = '''    // Rendering is never allowed to decide where the u
 '''
 text = text.replace(legacy_render_block, "", 1)
 
-# Keep horizontal header synchronization in core presentation code, but remove
-# the old controller's manual-override state mutation. ScrollController now
-# installs the authoritative manual-scroll listener after every render.
 legacy_listener = '''      timelineScroll.addEventListener("scroll", () => {
         if (this._scrollPositioned && Date.now() > this._programmaticScrollUntil) {
           this._savedScrollTop = timelineScroll.scrollTop;
@@ -57,18 +49,25 @@ service_neutral_listener = '''      timelineScroll.addEventListener("scroll", ()
         headerScroll.scrollLeft = timelineScroll.scrollLeft;
       }, { passive:true });
 '''
-if legacy_listener in text:
-    text = text.replace(legacy_listener, service_neutral_listener, 1)
-    print("removed legacy manual-scroll listener state")
+text = text.replace(legacy_listener, service_neutral_listener, 1)
+
+# Entire delayed post-render settling loop belonged to the legacy scroll
+# controller. The integration now calls ScrollController.attach/onRender after
+# the core render has completed.
+settle_start = text.find("    const renderGeneration = ++this._renderGeneration;\n")
+settle_end_marker = "    settleAfterRender();\n"
+if settle_start >= 0:
+    settle_end = text.find(settle_end_marker, settle_start)
+    if settle_end < 0:
+        raise RuntimeError("legacy settleAfterRender end marker missing")
+    settle_end += len(settle_end_marker)
+    text = text[:settle_start] + text[settle_end:]
+    print("removed legacy post-render scroll settling")
 
 legacy_fields = (
-    "_initialScrolled",
-    "_scrollPositioned",
-    "_scrollRequestId",
-    "_savedScrollTop",
-    "_savedScrollLeft",
-    "_scrollState",
-    "_programmaticScrollUntil",
+    "_initialScrolled", "_scrollPositioned", "_scrollRequestId",
+    "_savedScrollTop", "_savedScrollLeft", "_scrollState",
+    "_programmaticScrollUntil", "_renderGeneration",
 )
 
 lines = []
