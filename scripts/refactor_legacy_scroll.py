@@ -13,15 +13,12 @@ def remove_method(source: str, name: str) -> str:
     if start < 0:
         print(f"method already absent: {name}")
         return source
-
     brace = source.find("{", start)
     if brace < 0:
         raise RuntimeError(f"opening brace not found for {name}")
-
     depth = 0
     quote = None
     escape = False
-    template_expr_depth = 0
     i = brace
     while i < len(source):
         ch = source[i]
@@ -44,13 +41,7 @@ def remove_method(source: str, name: str) -> str:
             depth -= 1
             if depth == 0:
                 end = i + 1
-                while end < len(source) and source[end] in " \t":
-                    end += 1
-                if end < len(source) and source[end] == "\r":
-                    end += 1
-                if end < len(source) and source[end] == "\n":
-                    end += 1
-                if end < len(source) and source[end] == "\n":
+                while end < len(source) and source[end] in " \t\r\n":
                     end += 1
                 print(f"removed method: {name}")
                 return source[:start] + source[end:]
@@ -58,8 +49,6 @@ def remove_method(source: str, name: str) -> str:
     raise RuntimeError(f"closing brace not found for {name}")
 
 
-# Methods whose implementation is now owned by services/scroll-controller.js
-# and services/scroll-integration.js.
 for method in (
     "_scrollTargetForMode",
     "_shouldAutoRepositionAfterRender",
@@ -68,27 +57,26 @@ for method in (
 ):
     text = remove_method(text, method)
 
-# Legacy controller state.  Calls such as this._positionScroll(...) deliberately
-# remain in core: scroll-integration installs the service-backed implementation
-# on the prototype before a WeekPlanner instance is used.
-legacy_fragments = (
-    "    this._initialScrolled = false;\n",
-    "    this._scrollPositioned = false;\n",
-    "    this._scrollRequestId = 0;\n",
-    "    this._savedScrollTop = null;\n",
-    "    this._savedScrollLeft = 0;\n",
-    "    this._scrollState = \"auto\";\n",
-    "    this._programmaticScrollUntil = 0;\n",
-    "    this._scrollState = \"auto\";\n    this._scrollPositioned = false;\n    this._savedScrollTop = null;\n    this._scrollRequestId++;\n",
-    "    this._scrollState = \"auto\";\n    this._scrollPositioned = false;\n    this._scrollRequestId++;\n    this._savedScrollTop = null;\n",
-    "    this._initialScrolled = false;\n    this._scrollState = \"auto\";\n    this._scrollPositioned = false;\n    this._scrollRequestId++;\n    this._savedScrollTop = null;\n    this._savedScrollLeft = 0;\n",
-)
-for fragment in sorted(legacy_fragments, key=len, reverse=True):
-    text = text.replace(fragment, "")
+# This block belonged to the legacy controller. The service keeps its own
+# viewport state and restores it after the DOM has been rebuilt.
+legacy_render_block = '''    // Rendering is never allowed to decide where the user should be.
+    // Preserve the current timeline position before replacing DOM.
+    const previousScroll = this.shadowRoot.getElementById("scroll");
+    if (previousScroll && this._scrollPositioned) {
+      const mode = this._effectiveScrollMode();
+      if (this._scrollState === "manual" || mode === "fixed") {
+        this._savedScrollTop = previousScroll.scrollTop;
+        this._savedScrollLeft = previousScroll.scrollLeft || 0;
+      }
+    }
 
-# Any remaining direct writes to legacy-only fields are dead state and should
-# not survive this strangler cleanup.  Remove only simple assignment/update
-# statements; reads cause the verification below to fail instead of guessing.
+'''
+if legacy_render_block in text:
+    text = text.replace(legacy_render_block, "", 1)
+    print("removed legacy pre-render viewport preservation")
+else:
+    print("legacy pre-render viewport preservation already absent")
+
 legacy_fields = (
     "_initialScrolled",
     "_scrollPositioned",
@@ -98,23 +86,23 @@ legacy_fields = (
     "_scrollState",
     "_programmaticScrollUntil",
 )
+
+# Remove remaining simple writes to state owned by ScrollController.
 lines = []
 for line in text.splitlines(keepends=True):
     stripped = line.strip()
     if any(f"this.{field}" in stripped for field in legacy_fields):
-        is_simple_write = (
-            "=" in stripped
-            and not any(op in stripped for op in ("===", "!==", "==", "!=", ">=", "<="))
-        ) or stripped.endswith("++;") or stripped.endswith("--;" )
-        if is_simple_write:
+        is_write = (
+            ("=" in stripped and not any(op in stripped for op in ("===", "!==", "==", "!=", ">=", "<=")))
+            or stripped.endswith("++;")
+            or stripped.endswith("--;")
+        )
+        if is_write:
             print(f"removed legacy state write: {stripped}")
             continue
     lines.append(line)
 text = "".join(lines)
 
-# Guardrail: after removing the service-owned methods, core must not make
-# decisions based on legacy scroll state. Dynamic calls to the service-backed
-# methods are allowed.
 for field in legacy_fields:
     if f"this.{field}" in text:
         raise RuntimeError(f"legacy scroll state still referenced: {field}")
