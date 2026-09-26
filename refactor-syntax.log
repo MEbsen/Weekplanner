@@ -1,8 +1,8 @@
-/home/runner/work/Weekplanner/Weekplanner/custom_components/week_planner/frontend/week-planner-core.js:2263
-              }
-              ^
+/home/runner/work/Weekplanner/Weekplanner/custom_components/week_planner/frontend/week-planner-core.js:3246
+}
+^
 
-SyntaxError: missing ) after argument list
+SyntaxError: Unexpected token '}'
     at wrapSafe (node:internal/modules/cjs/loader:1713:18)
     at checkSyntax (node:internal/main/check_syntax:78:3)
 

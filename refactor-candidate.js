@@ -32,7 +32,6 @@ class WeekPlannerPanel extends HTMLElement {
     this._lastKnownDayKey = "";
     this._isDashboardCard = false;
     this._sessionVisibility = { weather:true, sun:true, energy:true };
-    this._renderGeneration = 0;
     this._sourceHealth = {};
     this._runtimeHealth = {
       status: "unknown",
@@ -2223,71 +2222,6 @@ class WeekPlannerPanel extends HTMLElement {
       el.addEventListener("click", () => this._showDailyWeather(JSON.parse(decodeURIComponent(el.dataset.dailyWeather)), el));
     });
 
-    const renderGeneration = ++this._renderGeneration;
-
-    const settleAfterRender = (attempt = 0) => {
-      const delays = [0, 50, 120, 240, 450, 800];
-
-      setTimeout(() => {
-        if (renderGeneration !== this._renderGeneration) return;
-
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            if (renderGeneration !== this._renderGeneration) return;
-
-            this._applyViewportHeight();
-
-            const scroll = this.shadowRoot.getElementById("scroll");
-            const header = this.shadowRoot.getElementById("headerScroll");
-            if (!scroll) return;
-
-            const measurable =
-              scroll.scrollHeight > 0 &&
-              scroll.clientHeight > 0 &&
-              scroll.scrollHeight > scroll.clientHeight;
-
-            if (!measurable && attempt + 1 < delays.length) {
-              settleAfterRender(attempt + 1);
-              return;
-            }
-
-              // Manual means the user owns the viewport. Re-render only
-              // restores that exact viewport and never recalculates it.
-                scroll.scrollTop = Math.max(
-                  0,
-                  Math.min(
-                    Math.max(0, scroll.scrollHeight - scroll.clientHeight),
-                  )
-                );
-                if (header) header.scrollLeft = scroll.scrollLeft;
-              }
-              return;
-            }
-
-              if (this._shouldAutoRepositionAfterRender()) {
-                // Follow NOW tracks day focus, so a completed render may
-                // re-evaluate the optimal viewport from the fresh layout.
-                this._positionScroll("post-render", true);
-              } else if (this._effectiveScrollMode() === "fixed") {
-                // Fixed-time mode does NOT reposition on normal data refresh.
-                // Preserve the current viewport exactly; only load/focus or a
-                // changed scroll setting re-applies the configured hour.
-                  scroll.scrollTop = Math.max(
-                    0,
-                    Math.min(
-                      Math.max(0, scroll.scrollHeight - scroll.clientHeight),
-                    )
-                  );
-                  if (header) header.scrollLeft = scroll.scrollLeft;
-                }
-              }
-            }
-          });
-        });
-      }, delays[Math.min(attempt, delays.length - 1)]);
-    };
-
-    settleAfterRender();
   }
 
   _scrollToConfiguredStart() {

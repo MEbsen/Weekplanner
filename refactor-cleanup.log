@@ -2,7 +2,7 @@ removed method: _scrollTargetForMode
 removed method: _shouldAutoRepositionAfterRender
 removed method: _resumeAutoScroll
 removed method: _positionScroll
-removed legacy manual-scroll listener state
+removed legacy post-render scroll settling
 removed legacy state line: this._initialScrolled = false;
 removed legacy state line: this._scrollPositioned = false;
 removed legacy state line: this._scrollRequestId = 0;
@@ -10,6 +10,7 @@ removed legacy state line: this._savedScrollTop = null;
 removed legacy state line: this._savedScrollLeft = 0;
 removed legacy state line: this._scrollState = "auto";
 removed legacy state line: this._programmaticScrollUntil = 0;
+removed legacy state line: this._renderGeneration = 0;
 removed legacy state line: this._scrollState = "auto";
 removed legacy state line: this._scrollPositioned = false;
 removed legacy state line: this._savedScrollTop = null;
@@ -26,18 +27,6 @@ removed legacy state line: this._savedScrollTop = null;
 removed legacy state line: this._savedScrollLeft = 0;
 removed legacy state line: this._initialScrolled = true;
 removed legacy state line: this._initialScrolled = true;
-removed legacy state line: if (this._scrollState === "manual") {
-removed legacy state line: if (this._savedScrollTop !== null) {
-removed legacy state line: this._programmaticScrollUntil = Date.now() + 300;
-removed legacy state line: this._savedScrollTop
-removed legacy state line: scroll.scrollLeft = this._savedScrollLeft || 0;
-removed legacy state line: if (!this._loading && this._scrollState === "auto") {
-removed legacy state line: this._scrollPositioned = false;
-removed legacy state line: this._savedScrollTop = null;
-removed legacy state line: if (this._savedScrollTop !== null) {
-removed legacy state line: this._programmaticScrollUntil = Date.now() + 300;
-removed legacy state line: this._savedScrollTop
-removed legacy state line: scroll.scrollLeft = this._savedScrollLeft || 0;
 removed legacy state line: this._initialScrolled = false;
 removed legacy state line: this._scrollState = "auto";
 removed legacy state line: this._scrollPositioned = false;
@@ -49,4 +38,4 @@ removed legacy state line: this._scrollState = "auto";
 removed legacy state line: this._scrollPositioned = false;
 removed legacy state line: this._scrollRequestId++;
 removed legacy state line: this._savedScrollTop = null;
-wrote custom_components/week_planner/frontend/week-planner-core.js (152512 chars)
+wrote custom_components/week_planner/frontend/week-planner-core.js (150052 chars)
