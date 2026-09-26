@@ -6,6 +6,7 @@ on:
       - cleanup/legacy-scroll-dev16
     paths:
       - scripts/refactor_legacy_scroll.py
+      - scripts/refactor_source_health.py
       - .github/workflows/refactor-cleanup.yml
   workflow_dispatch:
 
@@ -23,8 +24,14 @@ jobs:
       - name: Run cleanup
         run: |
           set +e
-          python scripts/refactor_legacy_scroll.py > refactor-cleanup.log 2>&1
-          echo $? > refactor-cleanup.exit
+          : > refactor-cleanup.log
+          python scripts/refactor_legacy_scroll.py >> refactor-cleanup.log 2>&1
+          STATUS=$?
+          if [ "$STATUS" = "0" ]; then
+            python scripts/refactor_source_health.py >> refactor-cleanup.log 2>&1
+            STATUS=$?
+          fi
+          echo $STATUS > refactor-cleanup.exit
           cat refactor-cleanup.log
           exit 0
       - name: Check refactored core syntax
@@ -54,5 +61,5 @@ jobs:
             git add custom_components/week_planner/frontend/week-planner-core.js
           fi
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m "Record legacy scroll cleanup candidate"
+          git commit -m "Record strangler cleanup candidate"
           git push origin HEAD:cleanup/legacy-scroll-dev16
