@@ -1,0 +1,46 @@
+name: Refactor cleanup
+
+on:
+  push:
+    branches:
+      - cleanup/legacy-scroll-dev16
+    paths:
+      - scripts/refactor_legacy_scroll.py
+      - .github/workflows/refactor-cleanup.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout refactor branch
+        uses: actions/checkout@v4
+        with:
+          ref: cleanup/legacy-scroll-dev16
+
+      - name: Remove bypassed legacy scroll implementation
+        run: python scripts/refactor_legacy_scroll.py
+
+      - name: Verify service modules and syntax
+        run: |
+          test -f custom_components/week_planner/frontend/services/scroll-controller.js
+          test -f custom_components/week_planner/frontend/services/scroll-integration.js
+          node --check custom_components/week_planner/frontend/week-planner-core.js
+          node --check custom_components/week_planner/frontend/services/scroll-controller.js
+          node --check custom_components/week_planner/frontend/services/scroll-integration.js
+
+      - name: Commit cleanup
+        run: |
+          if git diff --quiet; then
+            echo "No cleanup changes required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add custom_components/week_planner/frontend/week-planner-core.js
+          git commit -m "Remove bypassed legacy scroll implementation"
+          git push origin HEAD:cleanup/legacy-scroll-dev16
