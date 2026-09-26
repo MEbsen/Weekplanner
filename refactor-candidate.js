@@ -3238,10 +3238,6 @@ class WeekPlannerDashboardCard extends WeekPlannerPanel {
     this.style.maxHeight = `${available}px`;
     this.style.minHeight = `${available}px`;
 
-    // Only an unpositioned planner may request automatic positioning here.
-    // Normal resizes and data refreshes preserve the existing scrollTop.
-      this._positionScroll("viewport-ready", true);
-    }
   }
 }
 
