@@ -18,7 +18,6 @@ def remove_method(source: str, name: str) -> str:
     return source[:start_match.start()] + source[end:]
 
 
-# Remove legacy state ownership wherever a panel/card constructor reset it.
 text, source_resets = re.subn(r"(?m)^\s*this\._sourceHealth = \{\};\n", "", text)
 text, runtime_resets = re.subn(
     r'''(?m)^\s*this\._runtimeHealth = \{\n\s*status: "unknown",\n\s*last_success: null,\n\s*last_attempt: null,\n\s*last_error: "",\n\s*\};\n''',
@@ -28,7 +27,6 @@ text, runtime_resets = re.subn(
 print(f"removed source state resets: {source_resets}")
 print(f"removed runtime state resets: {runtime_resets}")
 
-# These methods are supplied by source-health-integration.js after core loads.
 for method in (
     "_healthNowIso",
     "_markSourceAttempt",
@@ -39,8 +37,6 @@ for method in (
 ):
     text = remove_method(text, method)
 
-# Runtime lifecycle keeps deciding *when* health changes, while the service
-# owns the state and rules for those transitions.
 text = text.replace(
     "    this._runtimeHealth.last_attempt = this._healthNowIso();\n",
     "    this._markRuntimeAttempt();\n",
@@ -64,20 +60,17 @@ runtime_failure = '''      this._runtimeHealth = {
 '''
 text = text.replace(runtime_failure, "      this._markRuntimeFailure(err);\n")
 
-# Data refresh only needs a comparable health snapshot. The service owns the
-# state, so core must ask it for a snapshot rather than reaching into fields.
-legacy_snapshot = '''this._stableJson({
-      runtime: this._runtimeHealth,
-      sources: this._sourceHealth,
-    })'''
-text, snapshot_count = re.subn(
-    re.escape(legacy_snapshot),
+# Replace every stable-json health object regardless of surrounding indentation.
+snapshot_pattern = re.compile(
+    r'''this\._stableJson\(\{\s*runtime:\s*this\._runtimeHealth,\s*sources:\s*this\._sourceHealth,\s*\}\)''',
+    re.MULTILINE,
+)
+text, snapshot_count = snapshot_pattern.subn(
     "this._stableJson(this._healthSnapshot())",
     text,
 )
 print(f"replaced health snapshots: {snapshot_count}")
 
-# Any remaining direct state access is a strangler leak.
 legacy_found = False
 for lineno, line in enumerate(text.splitlines(), 1):
     if "this._sourceHealth" in line or "this._runtimeHealth" in line:
@@ -86,7 +79,6 @@ for lineno, line in enumerate(text.splitlines(), 1):
 if legacy_found:
     raise RuntimeError("legacy health state references remain")
 
-# Verify the integration-owned API remains used by core.
 for required in (
     "this._markSourceAttempt(",
     "this._markSourceSuccess(",
