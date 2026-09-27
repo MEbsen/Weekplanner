@@ -32,6 +32,13 @@ class WeekPlannerPanel extends HTMLElement {
     this._lastKnownDayKey = "";
     this._isDashboardCard = false;
     this._sessionVisibility = { weather:true, sun:true, energy:true };
+    this._sourceHealth = {};
+    this._runtimeHealth = {
+      status: "unknown",
+      last_success: null,
+      last_attempt: null,
+      last_error: "",
+    };
     this._settingsOpen = false;
     this._renderPendingWhileSettingsOpen = false;
     this._serverTimeOffsetMs = 0;
@@ -55,6 +62,99 @@ class WeekPlannerPanel extends HTMLElement {
 
   set panel(value) {
     this._panel = value;
+  }
+
+  _healthNowIso() {
+    try {
+      return this._now().toISOString();
+    } catch {
+      return new Date().toISOString();
+    }
+  }
+
+  _markSourceAttempt(key, label) {
+    const previous = this._sourceHealth[key] || {};
+    this._sourceHealth[key] = {
+      ...previous,
+      key,
+      label,
+      status: previous.status || "unknown",
+      last_attempt: this._healthNowIso(),
+    };
+  }
+
+  _markSourceSuccess(key, label) {
+    const now = this._healthNowIso();
+    this._sourceHealth[key] = {
+      ...(this._sourceHealth[key] || {}),
+      key,
+      label,
+      status: "fresh",
+      last_attempt: now,
+      last_success: now,
+      last_error: "",
+    };
+  }
+
+  _markSourceFailure(key, label, err) {
+    const previous = this._sourceHealth[key] || {};
+    this._sourceHealth[key] = {
+      ...previous,
+      key,
+      label,
+      status: previous.last_success ? "stale" : "error",
+      last_attempt: this._healthNowIso(),
+      last_error: String(err?.message || err || "Ukendt fejl"),
+    };
+  }
+
+  _activeHealthItems() {
+    const configured = [];
+    const calendars = this._config?.calendar_entities || [];
+    if (calendars.length) configured.push(["calendar", "Kalendere"]);
+    if (this._config?.weather_entity && this._config?.weather_display !== "none") configured.push(["weather", "Vejr"]);
+    if (this._config?.show_sun_markers) configured.push(["sun", "Sol/dagslængde"]);
+    if (this._config?.show_moon_markers) configured.push(["moon", "Månefaser"]);
+    if ((this._config?.history_sources || []).length) configured.push(["history", "Historik"]);
+    if (this._config?.show_energy_prices && this._config?.energy_entity) configured.push(["energy", "Elpriser"]);
+
+    const runtime = {
+      key: "runtime",
+      label: "Home Assistant / Week Planner",
+      ...(this._runtimeHealth || {}),
+    };
+
+    return [
+      runtime,
+      ...configured.map(([key, label]) => ({
+        key,
+        label,
+        status: "unknown",
+        ...(this._sourceHealth[key] || {}),
+      })),
+    ];
+  }
+
+  _healthIconMarkup() {
+    const problematic = this._activeHealthItems().filter(
+      (item) => item.status === "stale" || item.status === "error"
+    );
+    if (!problematic.length) return "";
+
+    return problematic.map((item) => {
+      const lastSuccess = item.last_success
+        ? new Date(item.last_success).toLocaleString("da-DK")
+        : "aldrig";
+      const lastAttempt = item.last_attempt
+        ? new Date(item.last_attempt).toLocaleString("da-DK")
+        : "ukendt";
+      const state = item.status === "error" ? "Fejl" : "Ikke synkroniseret";
+      const title =
+        `${item.label}: ${state}. Sidst OK: ${lastSuccess}. `
+        + `Seneste forsøg: ${lastAttempt}`
+        + (item.last_error ? `. Fejl: ${item.last_error}` : "");
+      return `<span class="health-indicator ${item.status}" title="${this._escape(title)}" aria-label="${this._escape(title)}">⚠</span>`;
+    }).join("");
   }
 
   _dayKey(date = this._now()) {
@@ -192,7 +292,7 @@ class WeekPlannerPanel extends HTMLElement {
   async _initialize() {
     if (!this._hass || this._initializing) return;
     this._initializing = true;
-    this._markRuntimeAttempt();
+    this._runtimeHealth.last_attempt = this._healthNowIso();
     try {
       this._config = await this._hass.connection.sendMessagePromise({
         type: "week_planner/config",
@@ -228,9 +328,19 @@ class WeekPlannerPanel extends HTMLElement {
 
       this._lastKnownDayKey = this._dayKey(this._now());
       this._startRuntimeTimers();
-      this._markRuntimeSuccess();
+      this._runtimeHealth = {
+        status: "fresh",
+        last_success: this._healthNowIso(),
+        last_attempt: this._healthNowIso(),
+        last_error: "",
+      };
     } catch (err) {
-      this._markRuntimeFailure(err);
+      this._runtimeHealth = {
+        ...(this._runtimeHealth || {}),
+        status: this._runtimeHealth?.last_success ? "stale" : "error",
+        last_attempt: this._healthNowIso(),
+        last_error: String(err?.message || err),
+      };
       this._error = `Kunne ikke initialisere Week Planner: ${err?.message || err}`;
       this._loading = false;
       this._render();
@@ -275,14 +385,24 @@ class WeekPlannerPanel extends HTMLElement {
       return;
     }
 
-    this._markRuntimeAttempt();
+    this._runtimeHealth.last_attempt = this._healthNowIso();
     try {
       await this._handleDayRollover();
       await this._setupCalendarSubscriptions();
       await this._loadData(false);
-      this._markRuntimeSuccess();
+      this._runtimeHealth = {
+        status: "fresh",
+        last_success: this._healthNowIso(),
+        last_attempt: this._healthNowIso(),
+        last_error: "",
+      };
     } catch (err) {
-      this._markRuntimeFailure(err);
+      this._runtimeHealth = {
+        ...(this._runtimeHealth || {}),
+        status: this._runtimeHealth?.last_success ? "stale" : "error",
+        last_attempt: this._healthNowIso(),
+        last_error: String(err?.message || err),
+      };
       console.warn(`Week Planner recovery failed (${reason})`, err);
       this._render(false);
     }
@@ -408,21 +528,47 @@ class WeekPlannerPanel extends HTMLElement {
   async _refreshCalendarEvents(showError = true) {
     if (!this._hass || !this._config) return;
 
-    const previousHealth = this._stableJson(this._healthSnapshot());
-    const result = await this._refreshCalendarEventsManaged();
-    const healthChanged = previousHealth !== this._stableJson(this._healthSnapshot());
+    const start = new Date(this._weekStart);
+    const end = this._addDays(start, this._dayCount());
+    const calendars = this._config.calendar_entities || [];
 
-    if (result?.ok) {
-      if (showError && this._error?.startsWith("Kalenderdata")) this._error = "";
-      if (result.changed || healthChanged) this._render(false);
+    if (!calendars.length) {
+      if (Object.keys(this._events || {}).length) {
+        this._events = {};
+        this._render(false);
+      }
       return;
     }
 
-    if (showError) {
-      this._error = `Kalenderdata kunne ikke hentes: ${result?.error?.message || result?.error || "Ukendt fejl"}`;
-      this._render(false);
-    } else if (healthChanged) {
-      this._render(false);
+    try {
+      this._markSourceAttempt("calendar", "Kalendere");
+      const calendarResult = await this._hass.callWS({
+        type: "call_service",
+        domain: "calendar",
+        service: "get_events",
+        service_data: {
+          start_date_time: this._isoLocal(start),
+          end_date_time: this._isoLocal(end),
+        },
+        target: { entity_id: calendars },
+        return_response: true,
+      });
+      const nextEvents = calendarResult?.response || {};
+      this._markSourceSuccess("calendar", "Kalendere");
+      const changed = this._calendarDataChanged(nextEvents);
+
+      this._events = nextEvents;
+      if (showError && this._error?.startsWith("Kalenderdata")) this._error = "";
+
+      if (changed) {
+        this._render(false);
+      }
+    } catch (err) {
+      this._markSourceFailure("calendar", "Kalendere", err);
+      if (showError) {
+        this._error = `Kalenderdata kunne ikke hentes: ${err?.message || err}`;
+        this._render(false);
+      }
     }
   }
 
@@ -496,6 +642,58 @@ class WeekPlannerPanel extends HTMLElement {
     }
   }
 
+  async _loadHistoryData() {
+    const sources = this._config?.history_sources || [];
+    if (!sources.length) {
+      const changed = Object.keys(this._historyData || {}).length > 0;
+      this._historyData = {};
+      return { changed, ok: true };
+    }
+
+    const entityIds = [...new Set(sources.map((s) => s.entity_id).filter(Boolean))];
+    if (!entityIds.length) {
+      const changed = Object.keys(this._historyData || {}).length > 0;
+      this._historyData = {};
+      return { changed, ok: true };
+    }
+
+    const start = new Date(this._weekStart);
+    const end = this._addDays(start, this._dayCount());
+    const path =
+      `history/period/${encodeURIComponent(this._isoLocal(start))}`
+      + `?filter_entity_id=${encodeURIComponent(entityIds.join(","))}`
+      + `&end_time=${encodeURIComponent(this._isoLocal(end))}`;
+
+    try {
+      this._markSourceAttempt("history", "Historik");
+      const response = await this._hass.callApi("GET", path);
+      const mapped = {};
+
+      for (const series of response || []) {
+        if (!Array.isArray(series) || !series.length) continue;
+        const fallbackEntityId = series.find((item) => item?.entity_id)?.entity_id;
+        if (!fallbackEntityId) continue;
+
+        mapped[fallbackEntityId] = series.map((item, index) => ({
+          ...item,
+          entity_id: item.entity_id || fallbackEntityId,
+          previous_state: index > 0 ? series[index - 1]?.state : null,
+          previous_attributes: index > 0 ? (series[index - 1]?.attributes || {}) : {},
+          _history_index: index,
+        }));
+      }
+
+      const changed = this._stableJson(this._historyData || {}) !== this._stableJson(mapped);
+      this._historyData = mapped;
+      this._markSourceSuccess("history", "Historik");
+      return { changed, ok: true };
+    } catch (err) {
+      this._markSourceFailure("history", "Historik", err);
+      this._warnings.push(`Historik kunne ikke hentes: ${err?.message || err}`);
+      return { changed: false, ok: false };
+    }
+  }
+
   _historyMarkersForDay(day) {
     const dayStart = new Date(day);
     dayStart.setHours(0,0,0,0);
@@ -562,6 +760,20 @@ class WeekPlannerPanel extends HTMLElement {
     return result.sort((a,b) => a.datetime - b.datetime);
   }
 
+  async _callForecast(type) {
+    const weatherEntity = this._config.weather_entity;
+    if (!weatherEntity) return [];
+    const result = await this._hass.callWS({
+      type: "call_service",
+      domain: "weather",
+      service: "get_forecasts",
+      service_data: { type },
+      target: { entity_id: weatherEntity },
+      return_response: true,
+    });
+    return result?.response?.[weatherEntity]?.forecast || [];
+  }
+
   async _loadData(showLoading = true) {
     if (!this._hass || !this._config) return;
 
@@ -570,29 +782,189 @@ class WeekPlannerPanel extends HTMLElement {
       this._render();
     }
 
+    const start = new Date(this._weekStart);
+    const end = this._addDays(start, this._dayCount());
     const previousWarnings = this._warnings || [];
     const previousError = this._error || "";
-    const previousHealth = this._stableJson(this._healthSnapshot());
+    const previousHealth = this._stableJson({
+      runtime: this._runtimeHealth,
+      sources: this._sourceHealth,
+    });
+    const nextWarnings = [];
+    let nextError = "";
+    let changed = false;
 
     try {
-      const result = await this._loadDataManaged();
-      this._warnings = result?.warnings || [];
-      this._error = result?.error || "";
+      const calendars = this._config.calendar_entities || [];
+      if (calendars.length) {
+        try {
+          this._markSourceAttempt("calendar", "Kalendere");
+          const calendarResult = await this._hass.callWS({
+            type: "call_service",
+            domain: "calendar",
+            service: "get_events",
+            service_data: {
+              start_date_time: this._isoLocal(start),
+              end_date_time: this._isoLocal(end),
+            },
+            target: { entity_id: calendars },
+            return_response: true,
+          });
+          const nextEvents = calendarResult?.response || {};
+          this._markSourceSuccess("calendar", "Kalendere");
+          if (this._calendarDataChanged(nextEvents)) changed = true;
+          this._events = nextEvents;
+        } catch (err) {
+          this._markSourceFailure("calendar", "Kalendere", err);
+          nextError = `Kalenderdata kunne ikke hentes: ${err?.message || err}`;
+          // Last-known-good: keep this._events unchanged.
+        }
+      } else if (Object.keys(this._events || {}).length) {
+        this._events = {};
+        changed = true;
+      }
+
+      const mode = this._weatherVisibleNow()
+        ? (this._config.weather_display || "both")
+        : "none";
+
+      if (mode === "hourly" || mode === "both") {
+        try {
+          this._markSourceAttempt("weather", "Vejr");
+          const nextHourly = await this._callForecast("hourly");
+          if (this._stableJson(this._hourlyWeather || []) !== this._stableJson(nextHourly || [])) {
+            changed = true;
+          }
+          this._hourlyWeather = nextHourly || [];
+          this._markSourceSuccess("weather", "Vejr");
+        } catch (err) {
+          this._markSourceFailure("weather", "Vejr", err);
+          nextWarnings.push(`Timevejr kunne ikke hentes: ${err?.message || err}`);
+        }
+      } else if ((this._hourlyWeather || []).length) {
+        this._hourlyWeather = [];
+        changed = true;
+      }
+
+      if (mode === "daily" || mode === "both") {
+        try {
+          this._markSourceAttempt("weather", "Vejr");
+          const nextDaily = await this._callForecast("daily");
+          if (this._stableJson(this._dailyWeather || []) !== this._stableJson(nextDaily || [])) {
+            changed = true;
+          }
+          this._dailyWeather = nextDaily || [];
+          this._markSourceSuccess("weather", "Vejr");
+        } catch (err) {
+          this._markSourceFailure("weather", "Vejr", err);
+          nextWarnings.push(`Dagsvejr kunne ikke hentes: ${err?.message || err}`);
+        }
+      } else if ((this._dailyWeather || []).length) {
+        this._dailyWeather = [];
+        changed = true;
+      }
+
+      if (this._config.show_sun_markers) {
+        try {
+          this._markSourceAttempt("sun", "Sol/dagslængde");
+          const dates = Array.from({ length: this._dayCount() + 1 }, (_, i) =>
+            this._dateKey(this._addDays(start, i - 1))
+          );
+          const nextSunTimes = await this._hass.callWS({
+            type: "week_planner/sun_times",
+            dates,
+          }) || {};
+
+          const years = [...new Set(
+            dates.map((value) => Number(value.slice(0, 4)))
+          )];
+          const nextExtrema = await this._hass.callWS({
+            type: "week_planner/daylight_extrema",
+            years,
+          }) || {};
+
+          if (
+            this._stableJson(this._sunTimes || {}) !== this._stableJson(nextSunTimes) ||
+            this._stableJson(this._daylightExtrema || {}) !== this._stableJson(nextExtrema)
+          ) {
+            changed = true;
+          }
+
+          this._sunTimes = nextSunTimes;
+          this._daylightExtrema = nextExtrema;
+          this._markSourceSuccess("sun", "Sol/dagslængde");
+        } catch (err) {
+          this._markSourceFailure("sun", "Sol/dagslængde", err);
+          nextWarnings.push(`Soltider kunne ikke hentes: ${err?.message || err}`);
+        }
+      } else {
+        if (Object.keys(this._sunTimes || {}).length || Object.keys(this._daylightExtrema || {}).length) {
+          changed = true;
+        }
+        this._sunTimes = {};
+        this._daylightExtrema = {};
+      }
+
+      if (this._config.show_moon_markers) {
+        try {
+          this._markSourceAttempt("moon", "Månefaser");
+          const nextMoon = await this._hass.callWS({
+            type: "week_planner/moon_transitions",
+            start: this._isoLocal(start),
+            end: this._isoLocal(end),
+          }) || [];
+          if (this._stableJson(this._moonTransitions || []) !== this._stableJson(nextMoon)) {
+            changed = true;
+          }
+          this._moonTransitions = nextMoon;
+          this._markSourceSuccess("moon", "Månefaser");
+        } catch (err) {
+          this._markSourceFailure("moon", "Månefaser", err);
+          nextWarnings.push(`Månefaseskift kunne ikke hentes: ${err?.message || err}`);
+        }
+      } else if ((this._moonTransitions || []).length) {
+        this._moonTransitions = [];
+        changed = true;
+      }
+
+      const historyResult = await this._loadHistoryData();
+      if (historyResult?.changed) changed = true;
+
+      if (this._config?.show_energy_prices && this._config?.energy_entity) {
+        this._markSourceAttempt("energy", "Elpriser");
+        const entityId = this._config.energy_entity;
+        const state = this._hass?.states?.[entityId];
+        const compatibility = this._energyCompatibility();
+        if (!state || state.state === "unknown" || state.state === "unavailable" || !compatibility.ok) {
+          this._markSourceFailure(
+            "energy",
+            "Elpriser",
+            compatibility.text || `Entity ${entityId} er ikke tilgængelig`
+          );
+        } else {
+          this._markSourceSuccess("energy", "Elpriser");
+        }
+      }
+
+    } catch (err) {
+      console.error("Week Planner data load failed", err);
+      nextError = `Data kunne ikke hentes: ${err?.message || err}`;
+    } finally {
+      this._warnings = nextWarnings;
+      this._error = nextError;
       this._loading = false;
 
       const statusChanged =
         previousError !== this._error ||
         this._stableJson(previousWarnings) !== this._stableJson(this._warnings) ||
-        previousHealth !== this._stableJson(this._healthSnapshot());
+        previousHealth !== this._stableJson({
+          runtime: this._runtimeHealth,
+          sources: this._sourceHealth,
+        });
 
-      if (showLoading || result?.changed || statusChanged) {
+      if (showLoading || changed || statusChanged) {
         this._render();
       }
-    } catch (err) {
-      console.error("Week Planner DataManager load failed", err);
-      this._error = `Data kunne ikke hentes: ${err?.message || err}`;
-      this._loading = false;
-      this._render();
     }
   }
 

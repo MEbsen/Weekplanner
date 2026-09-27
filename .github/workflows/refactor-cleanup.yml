@@ -1,0 +1,72 @@
+name: Refactor cleanup
+
+on:
+  push:
+    branches:
+      - cleanup/legacy-scroll-dev16
+    paths:
+      - scripts/refactor_legacy_scroll.py
+      - scripts/refactor_source_health.py
+      - scripts/refactor_data_manager_cutover.py
+      - .github/workflows/refactor-cleanup.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cleanup/legacy-scroll-dev16
+      - name: Run cleanup
+        run: |
+          set +e
+          : > refactor-cleanup.log
+          python scripts/refactor_legacy_scroll.py >> refactor-cleanup.log 2>&1
+          STATUS=$?
+          if [ "$STATUS" = "0" ]; then
+            python scripts/refactor_source_health.py >> refactor-cleanup.log 2>&1
+            STATUS=$?
+          fi
+          if [ "$STATUS" = "0" ]; then
+            python scripts/refactor_data_manager_cutover.py >> refactor-cleanup.log 2>&1
+            STATUS=$?
+          fi
+          echo $STATUS > refactor-cleanup.exit
+          cat refactor-cleanup.log
+          exit 0
+      - name: Check refactored JavaScript syntax
+        run: |
+          set +e
+          : > refactor-syntax.log
+          if [ "$(cat refactor-cleanup.exit)" = "0" ]; then
+            node --check custom_components/week_planner/frontend/week-planner-core.js >> refactor-syntax.log 2>&1
+            STATUS=$?
+            if [ "$STATUS" = "0" ]; then node --check custom_components/week_planner/frontend/services/data-manager.js >> refactor-syntax.log 2>&1; STATUS=$?; fi
+            if [ "$STATUS" = "0" ]; then node --check custom_components/week_planner/frontend/services/data-manager-integration.js >> refactor-syntax.log 2>&1; STATUS=$?; fi
+          else
+            STATUS=99
+          fi
+          echo ${STATUS:-0} > refactor-syntax.exit
+          cat refactor-syntax.log
+          if [ "${STATUS:-0}" != "0" ]; then
+            cp custom_components/week_planner/frontend/week-planner-core.js refactor-candidate.js
+            git checkout -- custom_components/week_planner/frontend/week-planner-core.js
+          fi
+          exit 0
+      - name: Commit safe result and diagnostics
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add refactor-cleanup.log refactor-cleanup.exit refactor-syntax.log refactor-syntax.exit
+          if [ -f refactor-candidate.js ]; then git add refactor-candidate.js; fi
+          if [ "$(cat refactor-cleanup.exit)" = "0" ] && [ "$(cat refactor-syntax.exit)" = "0" ]; then
+            git add custom_components/week_planner/frontend/week-planner-core.js
+          fi
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Cut over Week Planner data loading to DataManager"
+          git push origin HEAD:cleanup/legacy-scroll-dev16
