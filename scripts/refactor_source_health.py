@@ -64,8 +64,20 @@ runtime_failure = '''      this._runtimeHealth = {
 '''
 text = text.replace(runtime_failure, "      this._markRuntimeFailure(err);\n")
 
-# Any remaining direct state access is a strangler leak. Print exact lines so
-# the workflow log is actionable instead of silently accepting partial cleanup.
+# Data refresh only needs a comparable health snapshot. The service owns the
+# state, so core must ask it for a snapshot rather than reaching into fields.
+legacy_snapshot = '''this._stableJson({
+      runtime: this._runtimeHealth,
+      sources: this._sourceHealth,
+    })'''
+text, snapshot_count = re.subn(
+    re.escape(legacy_snapshot),
+    "this._stableJson(this._healthSnapshot())",
+    text,
+)
+print(f"replaced health snapshots: {snapshot_count}")
+
+# Any remaining direct state access is a strangler leak.
 legacy_found = False
 for lineno, line in enumerate(text.splitlines(), 1):
     if "this._sourceHealth" in line or "this._runtimeHealth" in line:
@@ -82,6 +94,7 @@ for required in (
     "this._markRuntimeAttempt(",
     "this._markRuntimeSuccess(",
     "this._markRuntimeFailure(",
+    "this._healthSnapshot(",
     "this._healthIconMarkup(",
 ):
     if required not in text:
