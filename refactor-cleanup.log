@@ -11,10 +11,5 @@ removed method: _markSourceSuccess
 removed method: _markSourceFailure
 removed method: _activeHealthItems
 removed method: _healthIconMarkup
-replaced health snapshots: 1
-legacy health reference line 838: runtime: this._runtimeHealth,
-legacy health reference line 839: sources: this._sourceHealth,
-Traceback (most recent call last):
-  File "/home/runner/work/Weekplanner/Weekplanner/scripts/refactor_source_health.py", line 87, in <module>
-    raise RuntimeError("legacy health state references remain")
-RuntimeError: legacy health state references remain
+replaced health snapshots: 2
+wrote custom_components/week_planner/frontend/week-planner-core.js (145864 chars)

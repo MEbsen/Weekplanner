@@ -32,13 +32,6 @@ class WeekPlannerPanel extends HTMLElement {
     this._lastKnownDayKey = "";
     this._isDashboardCard = false;
     this._sessionVisibility = { weather:true, sun:true, energy:true };
-    this._sourceHealth = {};
-    this._runtimeHealth = {
-      status: "unknown",
-      last_success: null,
-      last_attempt: null,
-      last_error: "",
-    };
     this._settingsOpen = false;
     this._renderPendingWhileSettingsOpen = false;
     this._serverTimeOffsetMs = 0;
@@ -62,99 +55,6 @@ class WeekPlannerPanel extends HTMLElement {
 
   set panel(value) {
     this._panel = value;
-  }
-
-  _healthNowIso() {
-    try {
-      return this._now().toISOString();
-    } catch {
-      return new Date().toISOString();
-    }
-  }
-
-  _markSourceAttempt(key, label) {
-    const previous = this._sourceHealth[key] || {};
-    this._sourceHealth[key] = {
-      ...previous,
-      key,
-      label,
-      status: previous.status || "unknown",
-      last_attempt: this._healthNowIso(),
-    };
-  }
-
-  _markSourceSuccess(key, label) {
-    const now = this._healthNowIso();
-    this._sourceHealth[key] = {
-      ...(this._sourceHealth[key] || {}),
-      key,
-      label,
-      status: "fresh",
-      last_attempt: now,
-      last_success: now,
-      last_error: "",
-    };
-  }
-
-  _markSourceFailure(key, label, err) {
-    const previous = this._sourceHealth[key] || {};
-    this._sourceHealth[key] = {
-      ...previous,
-      key,
-      label,
-      status: previous.last_success ? "stale" : "error",
-      last_attempt: this._healthNowIso(),
-      last_error: String(err?.message || err || "Ukendt fejl"),
-    };
-  }
-
-  _activeHealthItems() {
-    const configured = [];
-    const calendars = this._config?.calendar_entities || [];
-    if (calendars.length) configured.push(["calendar", "Kalendere"]);
-    if (this._config?.weather_entity && this._config?.weather_display !== "none") configured.push(["weather", "Vejr"]);
-    if (this._config?.show_sun_markers) configured.push(["sun", "Sol/dagslængde"]);
-    if (this._config?.show_moon_markers) configured.push(["moon", "Månefaser"]);
-    if ((this._config?.history_sources || []).length) configured.push(["history", "Historik"]);
-    if (this._config?.show_energy_prices && this._config?.energy_entity) configured.push(["energy", "Elpriser"]);
-
-    const runtime = {
-      key: "runtime",
-      label: "Home Assistant / Week Planner",
-      ...(this._runtimeHealth || {}),
-    };
-
-    return [
-      runtime,
-      ...configured.map(([key, label]) => ({
-        key,
-        label,
-        status: "unknown",
-        ...(this._sourceHealth[key] || {}),
-      })),
-    ];
-  }
-
-  _healthIconMarkup() {
-    const problematic = this._activeHealthItems().filter(
-      (item) => item.status === "stale" || item.status === "error"
-    );
-    if (!problematic.length) return "";
-
-    return problematic.map((item) => {
-      const lastSuccess = item.last_success
-        ? new Date(item.last_success).toLocaleString("da-DK")
-        : "aldrig";
-      const lastAttempt = item.last_attempt
-        ? new Date(item.last_attempt).toLocaleString("da-DK")
-        : "ukendt";
-      const state = item.status === "error" ? "Fejl" : "Ikke synkroniseret";
-      const title =
-        `${item.label}: ${state}. Sidst OK: ${lastSuccess}. `
-        + `Seneste forsøg: ${lastAttempt}`
-        + (item.last_error ? `. Fejl: ${item.last_error}` : "");
-      return `<span class="health-indicator ${item.status}" title="${this._escape(title)}" aria-label="${this._escape(title)}">⚠</span>`;
-    }).join("");
   }
 
   _dayKey(date = this._now()) {
@@ -292,7 +192,7 @@ class WeekPlannerPanel extends HTMLElement {
   async _initialize() {
     if (!this._hass || this._initializing) return;
     this._initializing = true;
-    this._runtimeHealth.last_attempt = this._healthNowIso();
+    this._markRuntimeAttempt();
     try {
       this._config = await this._hass.connection.sendMessagePromise({
         type: "week_planner/config",
@@ -328,19 +228,9 @@ class WeekPlannerPanel extends HTMLElement {
 
       this._lastKnownDayKey = this._dayKey(this._now());
       this._startRuntimeTimers();
-      this._runtimeHealth = {
-        status: "fresh",
-        last_success: this._healthNowIso(),
-        last_attempt: this._healthNowIso(),
-        last_error: "",
-      };
+      this._markRuntimeSuccess();
     } catch (err) {
-      this._runtimeHealth = {
-        ...(this._runtimeHealth || {}),
-        status: this._runtimeHealth?.last_success ? "stale" : "error",
-        last_attempt: this._healthNowIso(),
-        last_error: String(err?.message || err),
-      };
+      this._markRuntimeFailure(err);
       this._error = `Kunne ikke initialisere Week Planner: ${err?.message || err}`;
       this._loading = false;
       this._render();
@@ -385,24 +275,14 @@ class WeekPlannerPanel extends HTMLElement {
       return;
     }
 
-    this._runtimeHealth.last_attempt = this._healthNowIso();
+    this._markRuntimeAttempt();
     try {
       await this._handleDayRollover();
       await this._setupCalendarSubscriptions();
       await this._loadData(false);
-      this._runtimeHealth = {
-        status: "fresh",
-        last_success: this._healthNowIso(),
-        last_attempt: this._healthNowIso(),
-        last_error: "",
-      };
+      this._markRuntimeSuccess();
     } catch (err) {
-      this._runtimeHealth = {
-        ...(this._runtimeHealth || {}),
-        status: this._runtimeHealth?.last_success ? "stale" : "error",
-        last_attempt: this._healthNowIso(),
-        last_error: String(err?.message || err),
-      };
+      this._markRuntimeFailure(err);
       console.warn(`Week Planner recovery failed (${reason})`, err);
       this._render(false);
     }
@@ -786,10 +666,7 @@ class WeekPlannerPanel extends HTMLElement {
     const end = this._addDays(start, this._dayCount());
     const previousWarnings = this._warnings || [];
     const previousError = this._error || "";
-    const previousHealth = this._stableJson({
-      runtime: this._runtimeHealth,
-      sources: this._sourceHealth,
-    });
+    const previousHealth = this._stableJson(this._healthSnapshot());
     const nextWarnings = [];
     let nextError = "";
     let changed = false;
@@ -957,10 +834,7 @@ class WeekPlannerPanel extends HTMLElement {
       const statusChanged =
         previousError !== this._error ||
         this._stableJson(previousWarnings) !== this._stableJson(this._warnings) ||
-        previousHealth !== this._stableJson({
-          runtime: this._runtimeHealth,
-          sources: this._sourceHealth,
-        });
+        previousHealth !== this._stableJson(this._healthSnapshot());
 
       if (showLoading || changed || statusChanged) {
         this._render();
