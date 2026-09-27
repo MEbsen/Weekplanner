@@ -7,6 +7,7 @@ on:
     paths:
       - scripts/refactor_legacy_scroll.py
       - scripts/refactor_source_health.py
+      - scripts/refactor_data_manager_cutover.py
       - .github/workflows/refactor-cleanup.yml
   workflow_dispatch:
 
@@ -31,16 +32,22 @@ jobs:
             python scripts/refactor_source_health.py >> refactor-cleanup.log 2>&1
             STATUS=$?
           fi
+          if [ "$STATUS" = "0" ]; then
+            python scripts/refactor_data_manager_cutover.py >> refactor-cleanup.log 2>&1
+            STATUS=$?
+          fi
           echo $STATUS > refactor-cleanup.exit
           cat refactor-cleanup.log
           exit 0
-      - name: Check refactored core syntax
+      - name: Check refactored JavaScript syntax
         run: |
           set +e
           : > refactor-syntax.log
           if [ "$(cat refactor-cleanup.exit)" = "0" ]; then
             node --check custom_components/week_planner/frontend/week-planner-core.js >> refactor-syntax.log 2>&1
             STATUS=$?
+            if [ "$STATUS" = "0" ]; then node --check custom_components/week_planner/frontend/services/data-manager.js >> refactor-syntax.log 2>&1; STATUS=$?; fi
+            if [ "$STATUS" = "0" ]; then node --check custom_components/week_planner/frontend/services/data-manager-integration.js >> refactor-syntax.log 2>&1; STATUS=$?; fi
           else
             STATUS=99
           fi
@@ -61,5 +68,5 @@ jobs:
             git add custom_components/week_planner/frontend/week-planner-core.js
           fi
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m "Record strangler cleanup candidate"
+          git commit -m "Cut over Week Planner data loading to DataManager"
           git push origin HEAD:cleanup/legacy-scroll-dev16
