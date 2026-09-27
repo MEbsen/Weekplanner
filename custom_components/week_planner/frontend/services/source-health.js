@@ -85,6 +85,15 @@ export class WeekPlannerSourceHealth {
     };
   }
 
+  snapshot() {
+    return {
+      runtime: { ...(this.runtime || {}) },
+      sources: Object.fromEntries(
+        Object.entries(this.sources || {}).map(([key, value]) => [key, { ...(value || {}) }])
+      ),
+    };
+  }
+
   activeItems() {
     const config = this.getConfig?.() || {};
     const configured = [];
