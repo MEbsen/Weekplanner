@@ -11,7 +11,11 @@ removed method: _markSourceSuccess
 removed method: _markSourceFailure
 removed method: _activeHealthItems
 removed method: _healthIconMarkup
+legacy health reference line 670: runtime: this._runtimeHealth,
+legacy health reference line 671: sources: this._sourceHealth,
+legacy health reference line 841: runtime: this._runtimeHealth,
+legacy health reference line 842: sources: this._sourceHealth,
 Traceback (most recent call last):
-  File "/home/runner/work/Weekplanner/Weekplanner/scripts/refactor_source_health.py", line 69, in <module>
-    raise RuntimeError(f"legacy health state still referenced: {legacy}")
-RuntimeError: legacy health state still referenced: this._sourceHealth
+  File "/home/runner/work/Weekplanner/Weekplanner/scripts/refactor_source_health.py", line 75, in <module>
+    raise RuntimeError("legacy health state references remain")
+RuntimeError: legacy health state references remain
