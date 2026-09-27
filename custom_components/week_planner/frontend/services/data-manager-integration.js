@@ -5,6 +5,15 @@ if (!panel) {
   console.warn("Week Planner DataManager integration: panel element unavailable");
 } else {
   const proto = panel.prototype;
+  const fields = {
+    _events: "events",
+    _hourlyWeather: "hourlyWeather",
+    _dailyWeather: "dailyWeather",
+    _sunTimes: "sunTimes",
+    _daylightExtrema: "daylightExtrema",
+    _moonTransitions: "moonTransitions",
+    _historyData: "historyData",
+  };
 
   function manager(instance) {
     if (!instance.__weekPlannerDataManager) {
@@ -28,43 +37,34 @@ if (!panel) {
     return instance.__weekPlannerDataManager;
   }
 
-  function seed(instance, dataManager) {
-    dataManager.events = instance._events || {};
-    dataManager.hourlyWeather = instance._hourlyWeather || [];
-    dataManager.dailyWeather = instance._dailyWeather || [];
-    dataManager.sunTimes = instance._sunTimes || {};
-    dataManager.daylightExtrema = instance._daylightExtrema || {};
-    dataManager.moonTransitions = instance._moonTransitions || [];
-    dataManager.historyData = instance._historyData || {};
-  }
-
-  function publish(instance, snapshot) {
-    instance._events = snapshot.events;
-    instance._hourlyWeather = snapshot.hourlyWeather;
-    instance._dailyWeather = snapshot.dailyWeather;
-    instance._sunTimes = snapshot.sunTimes;
-    instance._daylightExtrema = snapshot.daylightExtrema;
-    instance._moonTransitions = snapshot.moonTransitions;
-    instance._historyData = snapshot.historyData;
+  // Compatibility accessors keep rendering/projection code unchanged while
+  // DataManager becomes the single owner of fetched data. Existing core code
+  // may read/write _events etc., but those operations now target DataManager.
+  for (const [legacyField, managerField] of Object.entries(fields)) {
+    Object.defineProperty(proto, legacyField, {
+      configurable: true,
+      get() {
+        return manager(this)[managerField];
+      },
+      set(value) {
+        manager(this)[managerField] = value;
+      },
+    });
   }
 
   proto._dataManager = function() {
-    const dataManager = manager(this);
-    seed(this, dataManager);
-    return dataManager;
+    return manager(this);
+  };
+
+  proto._dataSnapshot = function() {
+    return manager(this).snapshot();
   };
 
   proto._loadDataManaged = async function() {
-    const dataManager = this._dataManager();
-    const result = await dataManager.loadAll();
-    publish(this, result.snapshot);
-    return result;
+    return manager(this).loadAll();
   };
 
   proto._refreshCalendarEventsManaged = async function() {
-    const dataManager = this._dataManager();
-    const result = await dataManager.fetchCalendars();
-    publish(this, dataManager.snapshot());
-    return result;
+    return manager(this).fetchCalendars();
   };
 }
