@@ -1,18 +1,9 @@
-method already absent: _scrollTargetForMode
-method already absent: _shouldAutoRepositionAfterRender
-method already absent: _resumeAutoScroll
-method already absent: _positionScroll
-wrote custom_components/week_planner/frontend/week-planner-core.js (145864 chars)
-removed source state resets: 0
-removed runtime state resets: 0
-method already absent: _healthNowIso
-method already absent: _markSourceAttempt
-method already absent: _markSourceSuccess
-method already absent: _markSourceFailure
-method already absent: _activeHealthItems
-method already absent: _healthIconMarkup
-replaced health snapshots: 0
-wrote custom_components/week_planner/frontend/week-planner-core.js (145864 chars)
-removed legacy method: _loadHistoryData
-removed legacy method: _callForecast
-wrote custom_components/week_planner/frontend/week-planner-core.js (136858 chars)
+removed constructor _events: 1
+removed constructor _hourlyWeather: 1
+removed constructor _dailyWeather: 1
+removed constructor _sunTimes: 1
+removed constructor _daylightExtrema: 1
+removed constructor _moonTransitions: 1
+removed constructor _historyData: 1
+removed _calendarDataChanged
+wrote custom_components/week_planner/frontend/week-planner-core.js (136767 chars)
