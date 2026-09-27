@@ -1,20 +1,44 @@
 // Week Planner frontend entrypoint.
 //
-// Keep this file intentionally small. The legacy/core implementation is loaded
-// first, then feature services patch the shared panel/card runtime. This lets
-// Week Planner move functionality out of the former monolithic frontend in
-// small, reversible commits.
+// The core defines the custom elements, while the service modules patch their
+// prototypes. Stage those definitions until every service has been installed
+// so Home Assistant cannot upgrade a panel/card and start initialization with
+// only half of the runtime available.
 
-await import("./week-planner-core.js");
-await import("./services/scroll-integration.js");
-await import("./services/source-health-integration.js");
-await import("./services/data-manager-integration.js");
+const registry = window.customElements;
+const originalDefine = registry.define.bind(registry);
+const originalGet = registry.get.bind(registry);
+const staged = new Map();
 
-window.weekPlannerFrontendVersion = "0.5.3-dev.16";
+registry.define = (name, constructor, options) => {
+  if (name.startsWith("week-planner-")) {
+    staged.set(name, { constructor, options });
+    return;
+  }
+  return originalDefine(name, constructor, options);
+};
+
+registry.get = (name) => staged.get(name)?.constructor || originalGet(name);
+
+try {
+  await import("./week-planner-core.js");
+  await import("./services/scroll-integration.js");
+  await import("./services/source-health-integration.js");
+  await import("./services/data-manager-integration.js");
+} finally {
+  registry.define = originalDefine;
+  registry.get = originalGet;
+}
+
+for (const [name, { constructor, options }] of staged) {
+  if (!originalGet(name)) originalDefine(name, constructor, options);
+}
+
+window.weekPlannerFrontendVersion = "0.5.3-dev.17";
 
 if (Array.isArray(window.customCards)) {
   const card = window.customCards.find((item) => item.type === "week-planner-card");
   if (card) {
-    card.description = "Week Planner dashboard card · frontend v0.5.3-dev.16";
+    card.description = "Week Planner dashboard card · frontend v0.5.3-dev.17";
   }
 }
