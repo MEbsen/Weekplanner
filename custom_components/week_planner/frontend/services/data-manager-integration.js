@@ -5,15 +5,6 @@ if (!panel) {
   console.warn("Week Planner DataManager integration: panel element unavailable");
 } else {
   const proto = panel.prototype;
-  const fields = {
-    _events: "events",
-    _hourlyWeather: "hourlyWeather",
-    _dailyWeather: "dailyWeather",
-    _sunTimes: "sunTimes",
-    _daylightExtrema: "daylightExtrema",
-    _moonTransitions: "moonTransitions",
-    _historyData: "historyData",
-  };
 
   function manager(instance) {
     if (!instance.__weekPlannerDataManager) {
@@ -35,21 +26,6 @@ if (!panel) {
       });
     }
     return instance.__weekPlannerDataManager;
-  }
-
-  // Compatibility accessors keep rendering/projection code unchanged while
-  // DataManager becomes the single owner of fetched data. Existing core code
-  // may read/write _events etc., but those operations now target DataManager.
-  for (const [legacyField, managerField] of Object.entries(fields)) {
-    Object.defineProperty(proto, legacyField, {
-      configurable: true,
-      get() {
-        return manager(this)[managerField];
-      },
-      set(value) {
-        manager(this)[managerField] = value;
-      },
-    });
   }
 
   proto._dataManager = function() {

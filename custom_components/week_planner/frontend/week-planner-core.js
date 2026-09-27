@@ -14,13 +14,6 @@ class WeekPlannerPanel extends HTMLElement {
     this._hass = null;
     this._config = null;
     this._weekStart = this._startOfWeek(new Date());
-    this._events = {};
-    this._hourlyWeather = [];
-    this._dailyWeather = [];
-    this._sunTimes = {};
-    this._daylightExtrema = {};
-    this._moonTransitions = [];
-    this._historyData = {};
     this._loading = true;
     this._error = "";
     this._warnings = [];
@@ -331,10 +324,10 @@ class WeekPlannerPanel extends HTMLElement {
       const configuredMode = this._config?.weather_display || "both";
       const needsHourly =
         (configuredMode === "hourly" || configuredMode === "both")
-        && !(this._hourlyWeather || []).length;
+        && !(this._dataManager().hourlyWeather || []).length;
       const needsDaily =
         (configuredMode === "daily" || configuredMode === "both")
-        && !(this._dailyWeather || []).length;
+        && !(this._dataManager().dailyWeather || []).length;
 
       if (needsHourly || needsDaily) {
         await this._loadData(false);
@@ -401,10 +394,6 @@ class WeekPlannerPanel extends HTMLElement {
     }
   }
 
-  _calendarDataChanged(nextEvents) {
-    return this._stableJson(this._events || {}) !== this._stableJson(nextEvents || {});
-  }
-
   async _refreshCalendarEvents(showError = true) {
     if (!this._hass || !this._config) return;
 
@@ -469,12 +458,12 @@ class WeekPlannerPanel extends HTMLElement {
             if (!Array.isArray(events)) return;
 
             const nextEvents = {
-              ...(this._events || {}),
+              ...(this._dataManager().events || {}),
               [entityId]: { events },
             };
 
             const changed = this._calendarDataChanged(nextEvents);
-            this._events = nextEvents;
+            this._dataManager().events = nextEvents;
 
             if (changed) {
               this._render(false);
@@ -509,7 +498,7 @@ class WeekPlannerPanel extends HTMLElement {
       const currentState = this._hass?.states?.[entityId];
       const friendlyName = currentState?.attributes?.friendly_name || entityId;
 
-      for (const item of this._historyData?.[entityId] || []) {
+      for (const item of this._dataManager().historyData?.[entityId] || []) {
         const attributes = item.attributes || {};
         const previousAttributes = item.previous_attributes || {};
         const isAutomation = entityId.startsWith("automation.");
@@ -598,7 +587,7 @@ class WeekPlannerPanel extends HTMLElement {
 
   _hourlyWeatherMap() {
     const map = new Map();
-    for (const item of this._hourlyWeather || []) {
+    for (const item of this._dataManager().hourlyWeather || []) {
       if (!item.datetime) continue;
       const d = new Date(item.datetime);
       map.set(this._hourKey(d), item);
@@ -608,7 +597,7 @@ class WeekPlannerPanel extends HTMLElement {
 
   _dailyWeatherMap() {
     const map = new Map();
-    for (const item of this._dailyWeather || []) {
+    for (const item of this._dataManager().dailyWeather || []) {
       if (!item.datetime) continue;
       const d = new Date(item.datetime);
       map.set(this._dateKey(d), item);
@@ -672,7 +661,7 @@ class WeekPlannerPanel extends HTMLElement {
     const dayEnd = this._addDays(dayStart, 1);
     const result = [];
 
-    for (const [entityId, payload] of Object.entries(this._events || {})) {
+    for (const [entityId, payload] of Object.entries(this._dataManager().events || {})) {
       for (const event of payload?.events || []) {
         if (!event.start || !event.end) continue;
         if (this._eventWantsRibbon(entityId, event)) continue;
@@ -714,7 +703,7 @@ class WeekPlannerPanel extends HTMLElement {
     const dayEnd = this._addDays(dayStart, 1);
     const result = [];
 
-    for (const [entityId, payload] of Object.entries(this._events || {})) {
+    for (const [entityId, payload] of Object.entries(this._dataManager().events || {})) {
       for (const event of payload?.events || []) {
         if (!event.start || !event.end || !this._eventWantsRibbon(entityId, event)) continue;
 
@@ -934,8 +923,8 @@ class WeekPlannerPanel extends HTMLElement {
     }
 
     const now = this._now();
-    const hourlyMap = this._hourlyWeatherMap();
-    const dailyMap = this._dailyWeatherMap();
+    const hourlyMap = this._dataManager().hourlyWeatherMap();
+    const dailyMap = this._dataManager().dailyWeatherMap();
     const energyMap = this._energyPriceMap();
     const mode = this._weatherVisibleNow()
       ? (this._config.weather_display || "both")
@@ -1581,7 +1570,7 @@ class WeekPlannerPanel extends HTMLElement {
 
       const solarLines = (() => {
         if (!this._config.show_sun_markers || !this._sunVisibleNow()) return "";
-        const times = this._sunTimes?.[this._dateKey(day)];
+        const times = this._dataManager().sunTimes?.[this._dateKey(day)];
         if (!times) return "";
 
         const lines = [];
@@ -1602,7 +1591,7 @@ class WeekPlannerPanel extends HTMLElement {
         return lines.join("");
       })();
 
-      const moonTransitionLines = this._moonTransitionsForDay(day).map((item) => {
+      const moonTransitionLines = this._dataManager().moonTransitionsForDay(day).map((item) => {
         const dt = new Date(item.datetime);
         const y = this._minutes(dt) / 60 * HOUR_HEIGHT;
         const tooltip = `Månefasen skifter til ${item.name} kl. ${this._formatTime(dt)}. Månen er herefter ${item.trend} frem mod næste faseskift.`;
@@ -1933,9 +1922,9 @@ class WeekPlannerPanel extends HTMLElement {
   _daylightInfo(day) {
     if (!this._config?.show_sun_markers || !this._sunVisibleNow()) return null;
 
-    const current = this._sunTimes?.[this._dateKey(day)];
-    const previous = this._sunTimes?.[this._dateKey(this._addDays(day, -1))];
-    const extrema = this._daylightExtrema?.[String(day.getFullYear())];
+    const current = this._dataManager().sunTimes?.[this._dateKey(day)];
+    const previous = this._dataManager().sunTimes?.[this._dateKey(this._addDays(day, -1))];
+    const extrema = this._dataManager().daylightExtrema?.[String(day.getFullYear())];
 
     if (!current?.sunrise || !current?.sunset || !extrema) return null;
 
@@ -2023,7 +2012,7 @@ class WeekPlannerPanel extends HTMLElement {
     dayStart.setHours(0,0,0,0);
     const dayEnd = this._addDays(dayStart, 1);
 
-    return (this._moonTransitions || []).filter((item) => {
+    return (this._dataManager().moonTransitions || []).filter((item) => {
       const dt = new Date(item.datetime);
       return !Number.isNaN(dt.getTime()) && dt >= dayStart && dt < dayEnd;
     });
