@@ -1,9 +1,0 @@
-removed constructor _events: 1
-removed constructor _hourlyWeather: 1
-removed constructor _dailyWeather: 1
-removed constructor _sunTimes: 1
-removed constructor _daylightExtrema: 1
-removed constructor _moonTransitions: 1
-removed constructor _historyData: 1
-removed _calendarDataChanged
-wrote custom_components/week_planner/frontend/week-planner-core.js (136767 chars)
