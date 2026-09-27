@@ -64,9 +64,15 @@ runtime_failure = '''      this._runtimeHealth = {
 '''
 text = text.replace(runtime_failure, "      this._markRuntimeFailure(err);\n")
 
-for legacy in ("this._sourceHealth", "this._runtimeHealth"):
-    if legacy in text:
-        raise RuntimeError(f"legacy health state still referenced: {legacy}")
+# Any remaining direct state access is a strangler leak. Print exact lines so
+# the workflow log is actionable instead of silently accepting partial cleanup.
+legacy_found = False
+for lineno, line in enumerate(text.splitlines(), 1):
+    if "this._sourceHealth" in line or "this._runtimeHealth" in line:
+        print(f"legacy health reference line {lineno}: {line.strip()}")
+        legacy_found = True
+if legacy_found:
+    raise RuntimeError("legacy health state references remain")
 
 # Verify the integration-owned API remains used by core.
 for required in (
