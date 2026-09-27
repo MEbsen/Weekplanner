@@ -45,6 +45,10 @@ if (!panel) {
     service(this).markRuntimeFailure(err);
   };
 
+  proto._healthSnapshot = function() {
+    return service(this).snapshot();
+  };
+
   proto._activeHealthItems = function() {
     return service(this).activeItems();
   };
