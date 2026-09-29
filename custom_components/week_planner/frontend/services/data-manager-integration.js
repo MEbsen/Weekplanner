@@ -41,8 +41,29 @@ if (!panel) {
     const dataManager = manager(this);
     const result = await dataManager.loadAll();
     const mode = this._config?.weather_display || "both";
+
     if (this._weatherVisibleNow() && (mode === "daily" || mode === "both")) {
-      result.changed = ensureDailyWeather(dataManager) || result.changed;
+      // Some HA weather providers expose hourly forecasts but reject/omit daily.
+      // Fetch hourly only as a data fallback when no daily payload arrived.
+      if (!(dataManager.dailyWeather || []).length && !(dataManager.hourlyWeather || []).length) {
+        try {
+          dataManager.hourlyWeather = await dataManager.fetchForecast("hourly");
+        } catch (_error) {
+          // Keep the original weather health/error from loadAll; there is no
+          // additional useful state to report if the fallback also fails.
+        }
+      }
+
+      const recovered = ensureDailyWeather(dataManager);
+      if ((dataManager.dailyWeather || []).length) {
+        // A valid native or derived daily dataset means Week Planner can serve
+        // the configured daily view even when the provider lacks native daily.
+        this._markSourceSuccess("weather", "Vejr");
+        result.warnings = (result.warnings || []).filter(
+          (warning) => !String(warning).startsWith("Dagsvejr kunne ikke hentes:")
+        );
+      }
+      result.changed = recovered || result.changed;
       result.snapshot = dataManager.snapshot();
     }
     return result;
