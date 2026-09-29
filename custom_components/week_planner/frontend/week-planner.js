@@ -34,11 +34,9 @@ for (const [name, { constructor, options }] of staged) {
   if (!originalGet(name)) originalDefine(name, constructor, options);
 }
 
-window.weekPlannerFrontendVersion = "0.5.3-dev.22";
+window.weekPlannerFrontendVersion = "0.5.3-dev.23";
 
 if (Array.isArray(window.customCards)) {
   const card = window.customCards.find((item) => item.type === "week-planner-card");
-  if (card) {
-    card.description = "Week Planner dashboard card · frontend v0.5.3-dev.22";
-  }
+  if (card) card.description = "Week Planner dashboard card · frontend v0.5.3-dev.23";
 }
