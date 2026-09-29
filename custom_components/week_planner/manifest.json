@@ -1,21 +1,13 @@
 {
   "domain": "week_planner",
   "name": "Week Planner",
-  "codeowners": [
-    "@MEbsen"
-  ],
+  "codeowners": ["@MEbsen"],
   "config_flow": true,
-  "dependencies": [
-    "frontend",
-    "http",
-    "lovelace"
-  ],
+  "dependencies": ["frontend", "http", "lovelace"],
   "documentation": "https://github.com/MEbsen/Weekplanner",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/MEbsen/Weekplanner/issues",
-  "requirements": [
-    "ephem==4.2.1"
-  ],
+  "requirements": ["ephem==4.2.1"],
   "single_config_entry": true,
-  "version": "0.5.3-dev.22"
+  "version": "0.5.3-dev.23"
 }
