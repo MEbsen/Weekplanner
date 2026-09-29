@@ -1,4 +1,5 @@
 import { WeekPlannerDataManager } from "./data-manager.js";
+import { ensureDailyWeather } from "./weather-data.js";
 
 const panel = customElements.get("week-planner-panel");
 if (!panel) {
@@ -37,7 +38,14 @@ if (!panel) {
   };
 
   proto._loadDataManaged = async function() {
-    return manager(this).loadAll();
+    const dataManager = manager(this);
+    const result = await dataManager.loadAll();
+    const mode = this._config?.weather_display || "both";
+    if (this._weatherVisibleNow() && (mode === "daily" || mode === "both")) {
+      result.changed = ensureDailyWeather(dataManager) || result.changed;
+      result.snapshot = dataManager.snapshot();
+    }
+    return result;
   };
 
   proto._refreshCalendarEventsManaged = async function() {
