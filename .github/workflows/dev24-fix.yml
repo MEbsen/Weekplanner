@@ -1,0 +1,20 @@
+name: Dev24 fix
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/datamanager-boundary-dev24
+      - run: python scripts/dev24_boundary_fix.py
+      - run: node --check custom_components/week_planner/frontend/week-planner-core.js
+      - run: |
+          git config user.name github-actions
+          git config user.email actions@github.com
+          git add custom_components/week_planner/frontend/week-planner-core.js
+          git commit -m 'Apply dev24 boundary fix'
+          git push
