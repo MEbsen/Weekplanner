@@ -462,8 +462,9 @@ class WeekPlannerPanel extends HTMLElement {
               [entityId]: { events },
             };
 
-            const changed = this._calendarDataChanged(nextEvents);
-            this._dataManager().events = nextEvents;
+            const manager = this._dataManager();
+            const changed = manager.changed(manager.events || {}, nextEvents);
+            manager.events = nextEvents;
 
             if (changed) {
               this._render(false);
@@ -923,8 +924,8 @@ class WeekPlannerPanel extends HTMLElement {
     }
 
     const now = this._now();
-    const hourlyMap = this._dataManager().hourlyWeatherMap();
-    const dailyMap = this._dataManager().dailyWeatherMap();
+    const hourlyMap = this._hourlyWeatherMap();
+    const dailyMap = this._dailyWeatherMap();
     const energyMap = this._energyPriceMap();
     const mode = this._weatherVisibleNow()
       ? (this._config.weather_display || "both")
@@ -1591,7 +1592,7 @@ class WeekPlannerPanel extends HTMLElement {
         return lines.join("");
       })();
 
-      const moonTransitionLines = this._dataManager().moonTransitionsForDay(day).map((item) => {
+      const moonTransitionLines = this._moonTransitionsForDay(day).map((item) => {
         const dt = new Date(item.datetime);
         const y = this._minutes(dt) / 60 * HOUR_HEIGHT;
         const tooltip = `Månefasen skifter til ${item.name} kl. ${this._formatTime(dt)}. Månen er herefter ${item.trend} frem mod næste faseskift.`;
