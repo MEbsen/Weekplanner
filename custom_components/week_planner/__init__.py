@@ -90,7 +90,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 
 async def _async_ensure_lovelace_resource(hass: HomeAssistant) -> None:
-    """Ensure the Week Planner frontend module is registered as a Lovelace resource."""
+    """Ensure exactly one current Week Planner Lovelace resource exists."""
     lovelace_data = hass.data.get(LOVELACE_DATA)
     if lovelace_data is None:
         raise RuntimeError("Lovelace is not initialized")
@@ -105,31 +105,38 @@ async def _async_ensure_lovelace_resource(hass: HomeAssistant) -> None:
 
     await resources.async_get_info()
     current_url = f"{_RESOURCE_BASE_URL}?v={VERSION}"
-
-    existing = None
-    for item in resources.async_items():
+    matches = []
+    for item in list(resources.async_items()):
         url = str(item.get(CONF_URL, ""))
-        if url == _RESOURCE_BASE_URL or url.startswith(f"{_RESOURCE_BASE_URL}?"):
-            existing = item
-            break
+        # Match both relative and absolute URLs so an older manually-created
+        # Week Planner resource cannot survive upgrades alongside the managed one.
+        base = url.split("?", 1)[0].rstrip("/")
+        if base == _RESOURCE_BASE_URL or base.endswith(_RESOURCE_BASE_URL):
+            matches.append(item)
 
-    if existing is None:
+    if not matches:
         await resources.async_create_item(
-            {
-                CONF_RESOURCE_TYPE_WS: "module",
-                CONF_URL: current_url,
-            }
+            {CONF_RESOURCE_TYPE_WS: "module", CONF_URL: current_url}
         )
+        _LOGGER.info("Registered Week Planner Lovelace resource %s", current_url)
         return
 
-    if existing.get(CONF_URL) != current_url:
+    primary = matches[0]
+    if primary.get(CONF_URL) != current_url or primary.get(CONF_RESOURCE_TYPE_WS) != "module":
         await resources.async_update_item(
-            existing["id"],
-            {
-                CONF_RESOURCE_TYPE_WS: "module",
-                CONF_URL: current_url,
-            },
+            primary["id"],
+            {CONF_RESOURCE_TYPE_WS: "module", CONF_URL: current_url},
         )
+        _LOGGER.info("Updated Week Planner Lovelace resource to %s", current_url)
+
+    # A duplicate stale resource can still make Lovelace request an old URL.
+    # Keep the first managed resource and remove every duplicate Week Planner entry.
+    for duplicate in matches[1:]:
+        try:
+            await resources.async_delete_item(duplicate["id"])
+            _LOGGER.info("Removed duplicate Week Planner Lovelace resource %s", duplicate.get(CONF_URL))
+        except Exception as err:
+            _LOGGER.warning("Could not remove duplicate Week Planner resource %s: %s", duplicate.get(CONF_URL), err)
 
 
 def _dashboard_config() -> dict:
