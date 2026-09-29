@@ -1,10 +1,13 @@
 name: Dev24 fix
 on:
-  workflow_dispatch:
+  push:
+    branches: [fix/datamanager-boundary-dev24]
+    paths: [.github/workflows/dev24-fix.yml]
 permissions:
   contents: write
 jobs:
   migrate:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
