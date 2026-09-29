@@ -1,5 +1,33 @@
 import { WeekPlannerDataManager } from "./data-manager.js";
 
+// Rendering was cut over to DataManager in dev.19, but the weather projection
+// helpers were left behind with the removed compatibility state. Keep these
+// projections on DataManager so panel and card use the same owned data.
+WeekPlannerDataManager.prototype.hourlyWeatherMap = function() {
+  const map = new Map();
+  for (const item of this.hourlyWeather || []) {
+    if (!item?.datetime) continue;
+    const d = new Date(item.datetime);
+    if (Number.isNaN(d.getTime())) continue;
+    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}-${d.getHours()}`;
+    map.set(key, item);
+  }
+  return map;
+};
+
+WeekPlannerDataManager.prototype.dailyWeatherMap = function() {
+  const map = new Map();
+  const pad = (n) => String(n).padStart(2, "0");
+  for (const item of this.dailyWeather || []) {
+    if (!item?.datetime) continue;
+    const d = new Date(item.datetime);
+    if (Number.isNaN(d.getTime())) continue;
+    const key = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    map.set(key, item);
+  }
+  return map;
+};
+
 const panel = customElements.get("week-planner-panel");
 if (!panel) {
   console.warn("Week Planner DataManager integration: panel element unavailable");
