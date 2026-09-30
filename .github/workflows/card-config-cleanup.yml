@@ -1,0 +1,30 @@
+name: Card shared data config cutover
+on:
+  push:
+    branches: [refactor/shared-data-config-dev26]
+    paths:
+      - scripts/remove_card_data_overlay.py
+      - .github/workflows/card-config-cleanup.yml
+permissions:
+  contents: write
+jobs:
+  cutover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refactor/shared-data-config-dev26
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Remove parallel card data config
+        run: python scripts/remove_card_data_overlay.py
+      - name: Syntax check
+        run: node --check custom_components/week_planner/frontend/week-planner-core.js
+      - name: Commit result
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add custom_components/week_planner/frontend/week-planner-core.js
+          git diff --cached --quiet || git commit -m "Remove parallel card data configuration"
+          git push
