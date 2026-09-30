@@ -2870,21 +2870,10 @@ class WeekPlannerCard extends WeekPlannerPanel {
     this._cardConfig = {
       height: 700,
       show_toolbar: true,
-      adopt_panel: true,
       hide_weather: false,
       hide_sun: false,
       hide_energy: false,
-      calendar_entities: [],
       days_to_show: 7,
-      weather_entity: "",
-      weather_display: "none",
-      show_sun_markers: false,
-      show_moon_markers: false,
-      energy_entity: "",
-      show_energy_prices: false,
-      show_week_number: true,
-      enlarge_today: true,
-      view_mode: "week",
       default_scroll_hour: 6,
       scroll_mode: "fixed",
     };
@@ -2898,23 +2887,10 @@ class WeekPlannerCard extends WeekPlannerPanel {
     return {
       height: 700,
       show_toolbar: true,
-      adopt_panel: true,
       hide_weather: false,
       hide_sun: false,
       hide_energy: false,
-      calendar_entities: [],
-      calendar_avatars: {},
-      calendar_colors: {},
       days_to_show: 7,
-      weather_entity: "",
-      weather_display: "none",
-      show_sun_markers: false,
-      show_moon_markers: false,
-      energy_entity: "",
-      show_energy_prices: false,
-      show_week_number: true,
-      enlarge_today: true,
-      view_mode: "week",
       default_scroll_hour: 6,
       scroll_mode: "fixed",
     };
@@ -2928,29 +2904,12 @@ class WeekPlannerCard extends WeekPlannerPanel {
       ...incoming,
       height: Number.isFinite(height) ? Math.min(1600, Math.max(320, height)) : 700,
       show_toolbar: incoming.show_toolbar !== false,
-      adopt_panel: incoming.adopt_panel !== false,
       hide_weather: Boolean(incoming.hide_weather),
       hide_sun: Boolean(incoming.hide_sun),
       hide_energy: Boolean(incoming.hide_energy),
-      calendar_entities: Array.isArray(incoming.calendar_entities) ? incoming.calendar_entities : [],
-      calendar_colors: incoming.calendar_colors && typeof incoming.calendar_colors === "object"
-        ? incoming.calendar_colors
-        : {},
-      calendar_avatars: incoming.calendar_avatars && typeof incoming.calendar_avatars === "object"
-        ? incoming.calendar_avatars
-        : {},
       days_to_show: Number.isFinite(Number(incoming.days_to_show))
         ? Math.min(14, Math.max(1, Math.round(Number(incoming.days_to_show))))
         : 7,
-      weather_entity: incoming.weather_entity || "",
-      weather_display: incoming.weather_display || "none",
-      show_sun_markers: Boolean(incoming.show_sun_markers),
-      show_moon_markers: Boolean(incoming.show_moon_markers),
-      energy_entity: incoming.energy_entity || "",
-      show_energy_prices: Boolean(incoming.show_energy_prices),
-      show_week_number: incoming.show_week_number !== false,
-      enlarge_today: incoming.enlarge_today !== false,
-      view_mode: incoming.view_mode === "rolling" ? "rolling" : "week",
       default_scroll_hour: Number.isFinite(Number(incoming.default_scroll_hour))
         ? Math.min(23, Math.max(0, Number(incoming.default_scroll_hour)))
         : 6,
@@ -2968,7 +2927,6 @@ class WeekPlannerCard extends WeekPlannerPanel {
       default_scroll_hour: this._cardConfig.default_scroll_hour,
       days_to_show: this._cardConfig.days_to_show,
       height: this._cardConfig.height,
-      adopt_panel: this._cardConfig.adopt_panel,
     });
     const scrollConfigChanged =
       previousScrollSignature !== null &&
@@ -2982,15 +2940,7 @@ class WeekPlannerCard extends WeekPlannerPanel {
     this._applyViewportHeight();
 
     if (this._config) {
-      if (this._cardConfig.adopt_panel === false) {
-        this._clearCalendarSubscriptions();
-        const today = this._now();
-        today.setHours(0,0,0,0);
-        this._weekStart = today;
-        this._loadData(false).then(() => this._setupCalendarSubscriptions());
-      } else {
-        this._render(false);
-      }
+      this._render(false);
     }
   }
 
@@ -3007,53 +2957,6 @@ class WeekPlannerCard extends WeekPlannerPanel {
     const d = new Date(date);
     d.setHours(0,0,0,0);
     return d;
-  }
-
-  _cardRuntimeOverlay() {
-    if (this._cardConfig?.adopt_panel !== false) return null;
-    return {
-      weather_entity: this._cardConfig.weather_entity || "",
-      weather_display: this._cardConfig.weather_display || "none",
-      calendar_entities: [...(this._cardConfig.calendar_entities || [])],
-      calendar_colors: this._cardConfig.calendar_colors || {},
-      calendar_display_modes: this._cardConfig.calendar_display_modes || {},
-      calendar_avatars: this._cardConfig.calendar_avatars || {},
-      history_sources: this._cardConfig.history_sources || [],
-      energy_entity: this._cardConfig.energy_entity || "",
-      show_energy_prices: Boolean(this._cardConfig.show_energy_prices),
-      show_sun_markers: Boolean(this._cardConfig.show_sun_markers),
-      show_moon_markers: Boolean(this._cardConfig.show_moon_markers),
-      show_week_number: this._cardConfig.show_week_number !== false,
-      enlarge_today: this._cardConfig.enlarge_today !== false,
-      view_mode: "rolling",
-      default_scroll_hour: Number(this._cardConfig.default_scroll_hour ?? 6),
-      scroll_mode: this._cardConfig.scroll_mode || "fixed",
-    };
-  }
-
-  async _withCardRuntimeConfig(callback) {
-    const overlay = this._cardRuntimeOverlay();
-    if (!overlay || !this._config) return callback();
-
-    const original = this._config;
-    this._config = { ...original, ...overlay };
-    try {
-      return await callback();
-    } finally {
-      this._config = original;
-    }
-  }
-
-  async _loadData(showLoading = true) {
-    return this._withCardRuntimeConfig(() => super._loadData(showLoading));
-  }
-
-  async _setupCalendarSubscriptions() {
-    return this._withCardRuntimeConfig(() => super._setupCalendarSubscriptions());
-  }
-
-  async _refreshCalendarEvents(showError = true) {
-    return this._withCardRuntimeConfig(() => super._refreshCalendarEvents(showError));
   }
 
   getCardSize() {
@@ -3077,15 +2980,6 @@ class WeekPlannerCard extends WeekPlannerPanel {
     const oldVisibility = {
       ...(this._sessionVisibility || { weather:true, sun:true, energy:true }),
     };
-    const oldConfig = this._config;
-
-    if (this._cardConfig?.adopt_panel === false && this._config) {
-      this._config = {
-        ...this._config,
-        ...this._cardRuntimeOverlay(),
-      };
-    }
-
     this._sessionVisibility = {
       weather: !this._cardConfig.hide_weather,
       sun: !this._cardConfig.hide_sun,
@@ -3094,7 +2988,6 @@ class WeekPlannerCard extends WeekPlannerPanel {
 
     super._render(allowScroll);
 
-    this._config = oldConfig;
     this._sessionVisibility = oldVisibility;
 
     requestAnimationFrame(() => {
@@ -3126,11 +3019,6 @@ class WeekPlannerCard extends WeekPlannerPanel {
       .toolbar {
         ${this._cardConfig?.show_toolbar === false ? "display:none !important;" : ""}
       }
-      ${this._cardConfig?.adopt_panel === false ? `
-        #configure, #toggleWeather, #toggleSun, #toggleEnergy {
-          display:none !important;
-        }
-      ` : ""}
     `;
   }
 }
@@ -3143,23 +3031,10 @@ class WeekPlannerCardEditor extends HTMLElement {
     this._config = {
       height: 700,
       show_toolbar: true,
-      adopt_panel: true,
       hide_weather: false,
       hide_sun: false,
       hide_energy: false,
-      calendar_entities: [],
-      calendar_avatars: {},
-      calendar_colors: {},
       days_to_show: 7,
-      weather_entity: "",
-      weather_display: "none",
-      show_sun_markers: false,
-      show_moon_markers: false,
-      energy_entity: "",
-      show_energy_prices: false,
-      show_week_number: true,
-      enlarge_today: true,
-      view_mode: "week",
       default_scroll_hour: 6,
       scroll_mode: "fixed",
     };
