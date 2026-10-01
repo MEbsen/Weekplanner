@@ -9,5 +9,5 @@
   "issue_tracker": "https://github.com/MEbsen/Weekplanner/issues",
   "requirements": ["ephem==4.2.1"],
   "single_config_entry": true,
-  "version": "0.5.3-dev.27"
+  "version": "0.5.3"
 }
