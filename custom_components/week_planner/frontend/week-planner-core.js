@@ -15,6 +15,7 @@ class WeekPlannerPanel extends HTMLElement {
     this._config = null;
     this._weekStart = this._startOfWeek(new Date());
     this._loading = true;
+    this._needsInitialRender = true;
     this._error = "";
     this._warnings = [];
     this._nowTimer = null;
@@ -159,7 +160,6 @@ class WeekPlannerPanel extends HTMLElement {
     this._markRuntimeAttempt();
     try {
       this._config = await this._getSharedConfig();
-      if (!this.isConnected) return;
       this._syncServerTime(this._config.server_time);
       this._config.calendar_colors ||= {};
       this._config.calendar_display_modes ||= {};
@@ -180,6 +180,7 @@ class WeekPlannerPanel extends HTMLElement {
         today.setHours(0,0,0,0);
         this._weekStart = today;
       }
+      if (!this.isConnected) return;
       await this._loadData();
       if (!this.isConnected) return;
       await this._setupCalendarSubscriptions();
@@ -451,6 +452,11 @@ class WeekPlannerPanel extends HTMLElement {
 
   async _loadData(showLoading = true) {
     if (!this._hass || !this._config) return;
+    // Cached data can be unchanged while this view has never rendered it.
+    // Lovelace may resolve config before connecting a newly created panel.
+    const needsInitialRender = this._needsInitialRender
+      || !this.shadowRoot?.getElementById("scroll");
+    const wasLoading = this._loading;
 
     if (showLoading) {
       this._loading = true;
@@ -473,7 +479,7 @@ class WeekPlannerPanel extends HTMLElement {
         this._stableJson(previousWarnings) !== this._stableJson(this._warnings) ||
         previousHealth !== this._healthRenderSignature();
 
-      if (showLoading || result?.changed || statusChanged) {
+      if (needsInitialRender || wasLoading || showLoading || result?.changed || statusChanged) {
         this._render();
       }
     } catch (err) {
@@ -1670,6 +1676,7 @@ class WeekPlannerPanel extends HTMLElement {
       </div>
     `;
 
+    this._needsInitialRender = false;
     this.shadowRoot.getElementById("configure")?.addEventListener("click", () => this._showSettings());
     this.shadowRoot.getElementById("toggleWeather")?.addEventListener("click", () => this._toggleSessionLayer("weather"));
     this.shadowRoot.getElementById("toggleSun")?.addEventListener("click", () => this._toggleSessionLayer("sun"));
@@ -2903,14 +2910,14 @@ if (!customElements.get("week-planner-card")) {
   customElements.define("week-planner-card", WeekPlannerCard);
 }
 
-window.weekPlannerFrontendVersion = "0.5.3-dev.29";
+window.weekPlannerFrontendVersion = "0.5.3-dev.30";
 window.customCards = window.customCards || [];
 
 if (!window.customCards.some((card) => card.type === "week-planner-card")) {
   window.customCards.push({
     type: "week-planner-card",
     name: "Week Planner Card",
-    description: "Week Planner dashboard card · frontend v0.5.3-dev.29",
+    description: "Week Planner dashboard card · frontend v0.5.3-dev.30",
     preview: false,
   });
 }

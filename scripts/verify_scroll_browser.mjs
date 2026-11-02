@@ -33,7 +33,9 @@ try{
   await page.evaluate(async()=>{
     await import("/week-planner.js");
     const config={
-      calendar_entities:[],weather_display:"none",show_sun_markers:false,
+      calendar_entities:[],calendar_colors:{},calendar_display_modes:{},calendar_avatars:{},
+      weather_entity:"",energy_entity:"",show_week_number:true,default_scroll_hour:6,enlarge_today:true,
+      weather_display:"none",show_sun_markers:false,
       show_moon_markers:false,history_sources:[],show_energy_prices:false,
       view_mode:"rolling",scroll_mode:"follow_now",server_time:"2026-11-02T15:30:00+01:00",
     };
@@ -79,6 +81,35 @@ try{
   await page.evaluate(()=>views[1]._render(false));
   await page.waitForFunction(expected=>Math.abs(views[1].shadowRoot.getElementById("scroll").scrollTop-expected)<2,manual);
   console.log("PASS real wheel input survives DOM replacement at",manual);
+  // Reproduce the reported legacy native dashboard: a regular card silently
+  // defaults to fixed 06:00 even though integration config says Follow NOW.
+  await page.evaluate(()=>{
+    const legacy=document.createElement("week-planner-card");
+    legacy.setConfig({height:979});
+    legacy.hass=views[0]._hass;
+    document.getElementById("host").replaceChildren(legacy);
+    window.legacyPanel=legacy;
+  });
+  await page.waitForFunction(()=>legacyPanel._config?.scroll_mode==="follow_now"
+    &&legacyPanel._effectiveScrollMode()==="fixed"
+    &&legacyPanel.shadowRoot.getElementById("scroll")?.scrollTop===448);
+  console.log("PASS reproduced legacy panel using regular card: central Follow NOW, effective fixed, top 448");
+  // HA can assign hass and resolve the shared cache before connecting a view.
+  // Exercise native panel mounting independently of the working regular card.
+  await page.evaluate(async()=>{
+    const previous=views[0];
+    const native=document.createElement("week-planner-dashboard-card");
+    native.hass=previous._hass;
+    await new Promise(resolve=>setTimeout(resolve,100));
+    document.getElementById("host").replaceChildren(native);
+    window.nativePanel=native;
+  });
+  await page.waitForFunction(()=>{
+    const scroll=nativePanel.shadowRoot.getElementById("scroll");
+    return scroll&&scroll.clientHeight>0&&scroll.scrollTop>0;
+  },null,{timeout:5000});
+  console.log("PASS native panel mounts independently from warm shared cache");
+  assert.equal(await page.evaluate(()=>nativePanel._effectiveScrollMode()),"follow_now");
   assert.deepEqual(errors,[],"browser errors");
 }finally{
   await browser?.close();
