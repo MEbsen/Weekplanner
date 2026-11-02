@@ -171,52 +171,6 @@ def _register_lovelace_panel(hass: HomeAssistant, dashboard_item: dict) -> None:
     )
 
 
-def _migrate_native_dashboard_config(config: dict) -> dict:
-    """Upgrade legacy hosts only inside Week Planner's own panel dashboard.
-
-    Old persisted dashboards used the regular Lovelace card, whose local
-    fixed/none scroll settings override the central panel configuration.
-    Preserve dashboard metadata and card settings; the native host consumes
-    integration settings instead of those old presentation overrides.
-    """
-    if not isinstance(config, dict) or not isinstance(config.get("views"), list):
-        return config
-    views = []
-    changed = False
-    for view in config["views"]:
-        if not isinstance(view, dict) or not (view.get("panel") or view.get("type") == "panel"):
-            views.append(view)
-            continue
-        cards = view.get("cards")
-        if not isinstance(cards, list):
-            views.append(view)
-            continue
-        migrated_cards = []
-        for card in cards:
-            if isinstance(card, dict) and card.get("type") == "custom:week-planner-card":
-                migrated_cards.append({**card, "type": _DASHBOARD_CARD_TYPE})
-                changed = True
-            else:
-                migrated_cards.append(card)
-        views.append({**view, "cards": migrated_cards})
-    return {**config, "views": views} if changed else config
-
-
-async def _async_load_native_dashboard(dashboard) -> None:
-    """Load/create the managed dashboard and migrate its historical card host."""
-    try:
-        config = await dashboard.async_load(False)
-    except Exception:
-        await dashboard.async_save(_dashboard_config())
-        return
-    migrated = _migrate_native_dashboard_config(config)
-    if migrated != config:
-        # A save failure must propagate, never replace a user's dashboard with
-        # the default layout as a fallback for a migration error.
-        await dashboard.async_save(migrated)
-        _LOGGER.info("Migrated legacy Week Planner card to native panel host")
-
-
 async def _async_ensure_native_dashboard(hass: HomeAssistant) -> None:
     """Create or restore Week Planner as a real Home Assistant dashboard."""
     lovelace_data = hass.data.get(LOVELACE_DATA)
@@ -226,7 +180,10 @@ async def _async_ensure_native_dashboard(hass: HomeAssistant) -> None:
     existing_runtime = lovelace_data.dashboards.get(PANEL_URL)
     if existing_runtime is not None:
         _register_lovelace_panel(hass, existing_runtime.config or {})
-        await _async_load_native_dashboard(existing_runtime)
+        try:
+            await existing_runtime.async_load(False)
+        except Exception:
+            await existing_runtime.async_save(_dashboard_config())
         return
 
     # Use Home Assistant's own dashboard storage collection instead of writing
@@ -258,7 +215,10 @@ async def _async_ensure_native_dashboard(hass: HomeAssistant) -> None:
     storage_dashboard = lovelace_dashboard.LovelaceStorage(hass, dashboard_item)
     lovelace_data.dashboards[PANEL_URL] = storage_dashboard
 
-    await _async_load_native_dashboard(storage_dashboard)
+    try:
+        await storage_dashboard.async_load(False)
+    except Exception:
+        await storage_dashboard.async_save(_dashboard_config())
 
     _register_lovelace_panel(hass, dashboard_item)
 

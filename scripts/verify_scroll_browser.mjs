@@ -81,8 +81,8 @@ try{
   await page.evaluate(()=>views[1]._render(false));
   await page.waitForFunction(expected=>Math.abs(views[1].shadowRoot.getElementById("scroll").scrollTop-expected)<2,manual);
   console.log("PASS real wheel input survives DOM replacement at",manual);
-  // Reproduce the reported legacy native dashboard: a regular card silently
-  // defaults to fixed 06:00 even though integration config says Follow NOW.
+  // A fullscreen regular card intentionally retains local fixed 06:00 mode
+  // even when the native panel's central setting is Follow NOW.
   await page.evaluate(()=>{
     const legacy=document.createElement("week-planner-card");
     legacy.setConfig({height:979});
@@ -93,7 +93,7 @@ try{
   await page.waitForFunction(()=>legacyPanel._config?.scroll_mode==="follow_now"
     &&legacyPanel._effectiveScrollMode()==="fixed"
     &&legacyPanel.shadowRoot.getElementById("scroll")?.scrollTop===448);
-  console.log("PASS reproduced legacy panel using regular card: central Follow NOW, effective fixed, top 448");
+  console.log("PASS fullscreen card preserves its local fixed mode independently of native panel Follow NOW");
   // HA can assign hass and resolve the shared cache before connecting a view.
   // Exercise native panel mounting independently of the working regular card.
   await page.evaluate(async()=>{

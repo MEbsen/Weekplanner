@@ -32,50 +32,6 @@ class Connection:
         self.error = (code, message)
 
 class BackendTests(unittest.IsolatedAsyncioTestCase):
-    async def test_legacy_native_panel_card_is_migrated_without_losing_metadata(self):
-        ns = functions("_migrate_native_dashboard_config",
-                       _DASHBOARD_CARD_TYPE="custom:week-planner-dashboard-card")
-        original = {"title": "Family", "views": [{
-            "title": "Week", "path": "planner", "panel": True,
-            "cards": [{"type": "custom:week-planner-card", "scroll_mode": "fixed", "height": 900},
-                      {"type": "markdown", "content": "Keep me"}],
-        }, {"title": "Custom", "cards": [{"type": "custom:week-planner-card"}]}]}
-        migrated = ns["_migrate_native_dashboard_config"](original)
-        self.assertEqual(migrated["views"][0]["cards"][0]["type"], "custom:week-planner-dashboard-card")
-        self.assertEqual(original["views"][0]["cards"][0]["type"], "custom:week-planner-card")
-        self.assertEqual(migrated["views"][0]["cards"][0]["height"], 900)
-        self.assertEqual(migrated["views"][0]["cards"][1], original["views"][0]["cards"][1])
-        self.assertEqual(migrated["views"][1], original["views"][1])
-        self.assertEqual(migrated["title"], "Family")
-        self.assertIs(ns["_migrate_native_dashboard_config"](migrated), migrated)
-
-    async def test_native_migration_is_persisted_once_and_save_failure_does_not_reset_dashboard(self):
-        ns = functions("_migrate_native_dashboard_config", "_async_load_native_dashboard",
-                       _DASHBOARD_CARD_TYPE="custom:week-planner-dashboard-card",
-                       _dashboard_config=lambda: {"default": True},
-                       _LOGGER=SimpleNamespace(info=lambda *_args: None))
-        data = {"views": [{"type": "panel", "cards": [{"type": "custom:week-planner-card"}]}]}
-        saves = []
-        async def load(_force):
-            return data
-        async def save(config):
-            nonlocal data
-            saves.append(config)
-            data = config
-        dashboard = SimpleNamespace(async_load=load, async_save=save)
-        await ns["_async_load_native_dashboard"](dashboard)
-        await ns["_async_load_native_dashboard"](dashboard)
-        self.assertEqual(len(saves), 1)
-        data = {"views": [{"panel": True, "cards": [{"type": "custom:week-planner-card"}]}]}
-        async def fail(config):
-            saves.append(config)
-            raise RuntimeError("Storage unavailable")
-        dashboard.async_save = fail
-        with self.assertRaisesRegex(RuntimeError, "Storage unavailable"):
-            await ns["_async_load_native_dashboard"](dashboard)
-        self.assertEqual(len(saves), 2)
-        self.assertNotIn("default", saves[-1])
-
     async def test_moon_rejects_inverted_and_oversized_ranges(self):
         async def executor(*_args):
             self.fail("Invalid range reached executor")

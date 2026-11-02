@@ -1,7 +1,7 @@
 """Constants for Week Planner."""
 DOMAIN = "week_planner"
 NAME = "Week Planner"
-VERSION = "0.5.3-dev.30"
+VERSION = "0.5.3-dev.31"
 
 CONF_WEATHER_ENTITY = "weather_entity"
 CONF_CALENDAR_ENTITIES = "calendar_entities"
