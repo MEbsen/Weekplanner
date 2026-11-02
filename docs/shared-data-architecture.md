@@ -1,5 +1,5 @@
 # Shared configuration and data
-Implementation version: 0.5.3-dev.30 (development prerelease).
+Implementation version: 0.5.3-dev.31 (development prerelease).
 
 ## Ownership
 A WeakMap keyed by the authenticated Home Assistant connection owns one WeekPlannerStore per browser JavaScript realm. Panel, managed dashboard and Lovelace cards obtain that store through sharedStore(hass). A different connection gets a different store.
@@ -34,14 +34,16 @@ Global configuration writes require Home Assistant administrator access. Nested 
 
 ## Validation
 
-### Native panel upgrade (dev.30)
-Historical managed dashboards could persist custom:week-planner-card in their
-panel view. That regular card defaults to local fixed 06:00 scrolling even when
-the central panel configuration is Follow NOW. On setup, only Week Planner's own
-managed panel views migrate that host type to custom:week-planner-dashboard-card.
-Dashboard metadata, unrelated cards and ordinary cards in other dashboards are
-preserved. The migration is idempotent and a failed migration save does not reset
-the dashboard to defaults.
+### Fullscreen cards and native panels (dev.31)
+A regular custom:week-planner-card remains a card when used in a Lovelace panel
+view or stretched to fullscreen. Its card editor controls local scroll_mode and
+default_scroll_hour. The central integration's Follow NOW setting applies to the
+native custom:week-planner-dashboard-card host. Shared configuration/data do not
+override explicit local presentation settings.
+
+The automatic native dashboard type migration introduced in dev.30 was based on
+an incorrect assumption about a fullscreen card and is removed in dev.31.
+Persisted dashboard card types are preserved.
 
 First rendering is required independently of data change detection. A panel
 whose config resolves before connection must render cached data on connection,

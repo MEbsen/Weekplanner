@@ -2,7 +2,7 @@
 
 Week Planner displays calendars, weather, sun/moon, energy prices and entity history in a native dashboard or Lovelace card.
 
-Current development version: **0.5.3-dev.30**. Use the prerelease version in HACS for testing.
+Current development version: **0.5.3-dev.31**. Use the prerelease version in HACS for testing.
 
 Panel and cards share integration configuration, data cache, identical requests and calendar subscriptions through one store per Home Assistant connection. Each view independently controls its date range, layout, visible layers, height and scroll. Separate tabs/devices have separate runtime caches.
 

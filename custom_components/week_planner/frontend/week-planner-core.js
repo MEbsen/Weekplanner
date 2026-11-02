@@ -2910,14 +2910,14 @@ if (!customElements.get("week-planner-card")) {
   customElements.define("week-planner-card", WeekPlannerCard);
 }
 
-window.weekPlannerFrontendVersion = "0.5.3-dev.30";
+window.weekPlannerFrontendVersion = "0.5.3-dev.31";
 window.customCards = window.customCards || [];
 
 if (!window.customCards.some((card) => card.type === "week-planner-card")) {
   window.customCards.push({
     type: "week-planner-card",
     name: "Week Planner Card",
-    description: "Week Planner dashboard card · frontend v0.5.3-dev.30",
+    description: "Week Planner dashboard card · frontend v0.5.3-dev.31",
     preview: false,
   });
 }
