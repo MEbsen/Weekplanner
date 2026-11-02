@@ -79,4 +79,4 @@ function patchPlannerPrototype(proto) {
 const Panel = customElements.get("week-planner-panel");
 if (!Panel) throw new Error("Week Planner scroll integration loaded before core");
 patchPlannerPrototype(Panel.prototype);
-window.weekPlannerScrollServiceVersion = "0.5.3-dev.29";
+window.weekPlannerScrollServiceVersion = "0.5.3-dev.30";

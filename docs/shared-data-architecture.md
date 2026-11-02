@@ -1,5 +1,5 @@
 # Shared configuration and data
-Implementation version: 0.5.3-dev.29 (development prerelease).
+Implementation version: 0.5.3-dev.30 (development prerelease).
 
 ## Ownership
 A WeakMap keyed by the authenticated Home Assistant connection owns one WeekPlannerStore per browser JavaScript realm. Panel, managed dashboard and Lovelace cards obtain that store through sharedStore(hass). A different connection gets a different store.
@@ -33,6 +33,20 @@ Health render signatures include source/status/error, not timestamps. Unchanged 
 Global configuration writes require Home Assistant administrator access. Nested rendering values and astronomy request sizes are validated. Moon computation runs in an executor; yearly sunlight calculation yields between dates and caches by year/location/timezone. Static-path and websocket registration flags belong to the Home Assistant instance and survive entry reloads.
 
 ## Validation
+
+### Native panel upgrade (dev.30)
+Historical managed dashboards could persist custom:week-planner-card in their
+panel view. That regular card defaults to local fixed 06:00 scrolling even when
+the central panel configuration is Follow NOW. On setup, only Week Planner's own
+managed panel views migrate that host type to custom:week-planner-dashboard-card.
+Dashboard metadata, unrelated cards and ordinary cards in other dashboards are
+preserved. The migration is idempotent and a failed migration save does not reset
+the dashboard to defaults.
+
+First rendering is required independently of data change detection. A panel
+whose config resolves before connection must render cached data on connection,
+even when that data is unchanged. Browser coverage now reproduces the legacy
+fixed/top=448 case and separately mounts the native host from a warm cache.
 
 ### Scroll readiness (dev.29)
 Each view observes the scroll viewport and timeline content with ResizeObserver,
