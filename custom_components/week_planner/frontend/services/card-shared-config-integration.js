@@ -15,8 +15,6 @@ const PRESENTATION_KEYS = new Set([
   "hide_sun",
   "hide_energy",
   "days_to_show",
-  "default_scroll_hour",
-  "scroll_mode",
 ]);
 
 function presentationConfig(input = {}) {
@@ -70,6 +68,7 @@ if (Editor) {
   Editor.prototype.setConfig = function setConfig(config) {
     const incoming = presentationConfig(config);
     this._config = {
+      type: incoming.type || "custom:week-planner-card",
       height: Number(incoming.height ?? 700),
       show_toolbar: incoming.show_toolbar !== false,
       hide_weather: Boolean(incoming.hide_weather),
@@ -78,12 +77,6 @@ if (Editor) {
       days_to_show: Number.isFinite(Number(incoming.days_to_show))
         ? Math.min(14, Math.max(1, Math.round(Number(incoming.days_to_show))))
         : 7,
-      default_scroll_hour: Number.isFinite(Number(incoming.default_scroll_hour))
-        ? Math.min(23, Math.max(0, Number(incoming.default_scroll_hour)))
-        : 6,
-      scroll_mode: ["none", "fixed", "follow_now"].includes(incoming.scroll_mode)
-        ? incoming.scroll_mode
-        : "fixed",
     };
     this._render();
   };
@@ -107,7 +100,7 @@ if (Editor) {
         }
       </style>
       <div class="editor">
-        <div class="hint">Datakilder, kalendere, vejr, sol/måne og elpris styres af Week Planners fælles konfiguration. Dette kort indeholder kun lokale visningsindstillinger.</div>
+        <div class="hint">Datakilder, kalendere, vejr, sol/måne og elpris styres af Week Planners fælles konfiguration. Scroll og tidsfokus styres også fælles. Dette kort indeholder kun lokale visningsindstillinger.</div>
         <div class="field">
           <label for="height">Card-højde</label>
           <input id="height" type="number" min="320" max="1600" step="20" value="${Number(cfg.height || 700)}">
@@ -122,18 +115,6 @@ if (Editor) {
         <div class="field">
           <label for="daysToShow">Antal dage</label>
           <input id="daysToShow" type="number" min="1" max="14" step="1" value="${Number(cfg.days_to_show ?? 7)}">
-        </div>
-        <div class="field">
-          <label for="scrollMode">Auto-scroll</label>
-          <select id="scrollMode">
-            <option value="none" ${cfg.scroll_mode === "none" ? "selected" : ""}>Ingen auto-scroll</option>
-            <option value="fixed" ${cfg.scroll_mode === "fixed" ? "selected" : ""}>Scroll til angivet time</option>
-            <option value="follow_now" ${cfg.scroll_mode === "follow_now" ? "selected" : ""}>Følg NU</option>
-          </select>
-        </div>
-        <div class="field" id="scrollHourRow" ${cfg.scroll_mode === "fixed" ? "" : "style=\"display:none\""}>
-          <label for="scrollHour">Tidspunkt</label>
-          <input id="scrollHour" type="number" min="0" max="23" step="1" value="${Number(cfg.default_scroll_hour ?? 6)}">
         </div>
       </div>`;
 
@@ -154,16 +135,6 @@ if (Editor) {
     });
     this.shadowRoot.getElementById("daysToShow")?.addEventListener("change", (event) => {
       this._config.days_to_show = Math.min(14, Math.max(1, Math.round(Number(event.target.value || 7))));
-      emit();
-    });
-    this.shadowRoot.getElementById("scrollMode")?.addEventListener("change", (event) => {
-      this._config.scroll_mode = ["none", "fixed", "follow_now"].includes(event.target.value)
-        ? event.target.value : "fixed";
-      emit();
-      this._render();
-    });
-    this.shadowRoot.getElementById("scrollHour")?.addEventListener("change", (event) => {
-      this._config.default_scroll_hour = Math.min(23, Math.max(0, Number(event.target.value || 6)));
       emit();
     });
   };
