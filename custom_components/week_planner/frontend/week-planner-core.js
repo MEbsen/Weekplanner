@@ -908,6 +908,8 @@ class WeekPlannerPanel extends HTMLElement {
         position:relative;
         overscroll-behavior:contain;
         scrollbar-gutter:stable;
+        scroll-behavior:auto;
+        overflow-anchor:none;
       }
       .header-grid {
         display:grid;
@@ -1657,7 +1659,7 @@ class WeekPlannerPanel extends HTMLElement {
               ${ribbonDays}
             </div>
           </div>
-          <div class="timeline-scroll" id="scroll">
+          <div class="timeline-scroll" id="scroll" tabindex="0" aria-label="Ugeplanens tidslinje">
             <div class="timeline-grid" style="--wp-columns:64px ${columns}">
               <div class="time-col">${hourLines}${timeLabels}</div>
               ${dayBodies}
@@ -2901,14 +2903,14 @@ if (!customElements.get("week-planner-card")) {
   customElements.define("week-planner-card", WeekPlannerCard);
 }
 
-window.weekPlannerFrontendVersion = "0.5.3-dev.28";
+window.weekPlannerFrontendVersion = "0.5.3-dev.29";
 window.customCards = window.customCards || [];
 
 if (!window.customCards.some((card) => card.type === "week-planner-card")) {
   window.customCards.push({
     type: "week-planner-card",
     name: "Week Planner Card",
-    description: "Week Planner dashboard card · frontend v0.5.3-dev.28",
+    description: "Week Planner dashboard card · frontend v0.5.3-dev.29",
     preview: false,
   });
 }
