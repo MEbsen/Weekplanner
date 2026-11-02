@@ -7,11 +7,27 @@ on:
   pull_request:
     branches:
       - main
+      - dev
 
 permissions:
   contents: read
 
 jobs:
+  regression:
+    name: Shared data and backend regression tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: node --test tests/*.test.mjs
+      - run: python -m unittest discover -s tests -p 'test_*.py'
+      - run: python -m compileall -q custom_components/week_planner
+
   hacs:
     name: HACS validation
     runs-on: ubuntu-latest

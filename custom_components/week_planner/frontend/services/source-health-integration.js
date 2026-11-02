@@ -1,4 +1,3 @@
-import { WeekPlannerSourceHealth } from "./source-health.js";
 
 const panel = customElements.get("week-planner-panel");
 if (!panel) {
@@ -7,15 +6,12 @@ if (!panel) {
   const proto = panel.prototype;
 
   function service(instance) {
-    if (!instance.__weekPlannerSourceHealth) {
-      instance.__weekPlannerSourceHealth = new WeekPlannerSourceHealth({
-        getNow: () => instance._now(),
-        getConfig: () => instance._config,
-        escapeHtml: (value) => instance._escape(value),
-      });
-    }
-    return instance.__weekPlannerSourceHealth;
+    return instance._sharedStore().health(instance);
   }
+
+  proto._healthRenderSignature = function() {
+    return service(this).renderSignature();
+  };
 
   proto._healthNowIso = function() {
     return service(this).nowIso();

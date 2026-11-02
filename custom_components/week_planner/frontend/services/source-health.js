@@ -94,6 +94,11 @@ export class WeekPlannerSourceHealth {
     };
   }
 
+  renderSignature() {
+    return JSON.stringify(this.activeItems().map(({ key, status, last_error }) =>
+      ({ key, status, last_error })));
+  }
+
   activeItems() {
     const config = this.getConfig?.() || {};
     const configured = [];
