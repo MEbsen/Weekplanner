@@ -1,248 +1,277 @@
 export const ScrollMode = Object.freeze({
-  FOLLOW_NOW: "follow_now",
-  FIXED: "fixed",
-  NONE: "none",
+  FOLLOW_NOW: "follow_now", FIXED: "fixed", NONE: "none",
 });
-
 export const ScrollState = Object.freeze({
-  AUTO: "auto",
-  MANUAL_OVERRIDE: "manual_override",
-  MANUAL_STATIC: "manual_static",
+  AUTO: "auto", MANUAL_OVERRIDE: "manual_override", MANUAL_STATIC: "manual_static",
 });
-
 const DEFAULT_OVERRIDE_MS = 5 * 60 * 1000;
+const SCROLL_KEYS = new Set(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","PageUp","PageDown","Home","End"," "]);
 
 /**
- * Shared Week Planner scroll state machine.
- *
- * Panel and Lovelace card must use the same controller. Rendering/data refresh
- * is deliberately transparent to the logical state: a rebuilt DOM restores
- * the current viewport instead of changing mode.
+ * Per-view scroll state over the shared data layer.
+ * Geometry observers, rather than a startup deadline, determine when a view
+ * can be positioned. Only actual input can enter manual override.
  */
 export class WeekPlannerScrollController {
-  constructor({
-    getMode,
-    getFixedHour,
-    getNow,
-    hourHeight,
-    manualOverrideMs = DEFAULT_OVERRIDE_MS,
-    onStateChange = null,
-  }) {
-    this.getMode = getMode;
-    this.getFixedHour = getFixedHour;
-    this.getNow = getNow;
-    this.hourHeight = hourHeight;
-    this.manualOverrideMs = manualOverrideMs;
-    this.onStateChange = onStateChange;
-
+  constructor({ getMode, getFixedHour, getNow, hourHeight,
+    manualOverrideMs = DEFAULT_OVERRIDE_MS, onStateChange = null }) {
+    Object.assign(this, {getMode,getFixedHour,getNow,hourHeight,manualOverrideMs,onStateChange});
     this.state = ScrollState.AUTO;
     this.savedTop = null;
     this.savedLeft = 0;
     this.manualUntil = 0;
-    this.programmaticUntil = 0;
-    this.requestId = 0;
     this.returnTimer = null;
+    this.root = null;
+    this.scroll = null;
+    this.frame = null;
+    this.retryTimer = null;
+    this.listeners = [];
+    this.destroyed = false;
+    this.pendingRestore = false;
+    this.expectedTop = null;
+    this.inputUntil = 0;
+    this.dragging = false;
+    this.reason = "initial";
   }
 
   destroy() {
-    this.requestId++;
-    if (this.returnTimer) clearTimeout(this.returnTimer);
-    this.returnTimer = null;
+    this.destroyed = true;
+    this._clearReturnTimer();
+    this._cancelFrame();
+    clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+    this.resizeObserver?.disconnect();
+    this.mutationObserver?.disconnect();
+    this._unbind();
+    this.root = null;
   }
 
-  mode() {
-    return this.getMode?.() || ScrollMode.FIXED;
-  }
-
-  isProgrammatic() {
-    return Date.now() <= this.programmaticUntil;
-  }
+  mode() { return this.getMode?.() || ScrollMode.FIXED; }
 
   _notify(reason) {
     this.onStateChange?.({
-      state: this.state,
-      mode: this.mode(),
-      savedTop: this.savedTop,
-      savedLeft: this.savedLeft,
-      manualUntil: this.manualUntil,
-      reason,
+      state:this.state, mode:this.mode(), savedTop:this.savedTop,
+      savedLeft:this.savedLeft, manualUntil:this.manualUntil, reason,
     });
   }
 
+  _cancelFrame() {
+    if (this.frame != null) cancelAnimationFrame(this.frame);
+    this.frame = null;
+  }
+
   _clearReturnTimer() {
-    if (this.returnTimer) clearTimeout(this.returnTimer);
+    clearTimeout(this.returnTimer);
     this.returnTimer = null;
   }
 
   _scheduleReturn() {
     this._clearReturnTimer();
     if (this.state !== ScrollState.MANUAL_OVERRIDE) return;
-
-    const remaining = Math.max(0, this.manualUntil - Date.now());
     this.returnTimer = setTimeout(() => {
       this.returnTimer = null;
-      if (this.state !== ScrollState.MANUAL_OVERRIDE) return;
+      if (this.destroyed || this.state !== ScrollState.MANUAL_OVERRIDE) return;
       this.state = ScrollState.AUTO;
       this.manualUntil = 0;
       this.savedTop = null;
-      this.requestId++;
       this._notify("manual-timeout");
-      this.position("manual-timeout", true);
-    }, remaining);
+      this.position("manual-timeout");
+    }, Math.max(0, this.manualUntil - Date.now()));
   }
 
-  onManualScroll(scrollElement) {
-    if (!scrollElement || this.isProgrammatic()) return;
-
-    this.savedTop = scrollElement.scrollTop;
-    this.savedLeft = scrollElement.scrollLeft || 0;
-    this.requestId++;
-
-    if (this.mode() === ScrollMode.NONE) {
-      this.state = ScrollState.MANUAL_STATIC;
-      this.manualUntil = 0;
-      this._clearReturnTimer();
-      this._notify("manual-static");
-      return;
-    }
-
-    this.state = ScrollState.MANUAL_OVERRIDE;
-    this.manualUntil = Date.now() + this.manualOverrideMs;
+  onManualScroll(scroll = this.scroll) {
+    if (!scroll || this.destroyed) return;
+    // Called from input handlers, never from an unclassified scroll event.
+    this._cancelFrame();
+    this.pendingRestore = false;
+    this.inputUntil = Date.now() + 1500;
+    this.savedTop = scroll.scrollTop;
+    this.savedLeft = scroll.scrollLeft || 0;
+    this.state = this.mode() === ScrollMode.NONE
+      ? ScrollState.MANUAL_STATIC : ScrollState.MANUAL_OVERRIDE;
+    this.manualUntil = this.state === ScrollState.MANUAL_OVERRIDE
+      ? Date.now() + this.manualOverrideMs : 0;
     this._scheduleReturn();
-    this._notify("manual-override");
+    this._notify("user-input");
+  }
+
+  _onScroll() {
+    const scroll = this.scroll;
+    if (!scroll) return;
+    const header = this.root?.getElementById("headerScroll");
+    if (header) header.scrollLeft = scroll.scrollLeft;
+    // Native scroll events can arrive long after a write on a busy machine.
+    // Matching the actual position is reliable; a 300ms suppression window isn't.
+    if (this.pendingRestore || (this.expectedTop != null
+      && Math.abs(scroll.scrollTop - this.expectedTop) < 1
+      && Math.abs(scroll.scrollLeft - this.savedLeft) < 1)) return;
+    if ((this.dragging || Date.now() <= this.inputUntil) && this.state !== ScrollState.AUTO) {
+      this.savedTop = scroll.scrollTop;
+      this.savedLeft = scroll.scrollLeft || 0;
+      this.inputUntil = Date.now() + 1500; // touch/wheel momentum
+      if (this.state === ScrollState.MANUAL_OVERRIDE) {
+        this.manualUntil = Date.now() + this.manualOverrideMs;
+        this._scheduleReturn();
+      }
+    } else if (this.state === ScrollState.AUTO) {
+      // Browser anchoring, layout changes and DOM restoration are not user input.
+      this.position("browser-scroll");
+    }
   }
 
   onConfigChanged() {
     this._clearReturnTimer();
-    this.requestId++;
     this.savedTop = null;
     this.savedLeft = 0;
     this.manualUntil = 0;
-    this.state = this.mode() === ScrollMode.NONE
-      ? ScrollState.MANUAL_STATIC
-      : ScrollState.AUTO;
+    this.inputUntil = 0;
+    this.state = this.mode() === ScrollMode.NONE ? ScrollState.MANUAL_STATIC : ScrollState.AUTO;
     this._notify("config-changed");
+    this.position("config-changed");
   }
 
-  onFocus() {
-    // Focus itself does not cancel a user's five-minute override. It merely
-    // makes sure the current logical state is represented by the current DOM.
+  onFocus() { this.position("focus"); }
+
+  onDayChange() {
+    if (this.mode() !== ScrollMode.NONE) {
+      this._clearReturnTimer();
+      this.state = ScrollState.AUTO;
+      this.manualUntil = 0;
+      this.inputUntil = 0;
+      this.savedTop = null;
+      this.savedLeft = 0;
+    }
+    this.position("day-change");
+  }
+
+  onRender() { this.position("render"); }
+
+  _target(scroll) {
+    if (this.mode() === ScrollMode.NONE) return null;
+    const max = Math.max(0, scroll.scrollHeight - scroll.clientHeight);
+    const now = this.getNow();
+    const hour = this.mode() === ScrollMode.FOLLOW_NOW
+      ? now.getHours() + now.getMinutes() / 60 : Number(this.getFixedHour?.() ?? 6);
+    return Math.max(0, Math.min(max, hour * this.hourHeight - 8));
+  }
+
+  _listen(target, event, callback, options = {passive:true}) {
+    target?.addEventListener(event, callback, options);
+    this.listeners.push(() => target?.removeEventListener(event, callback, options));
+  }
+
+  _unbind() {
+    for (const remove of this.listeners.splice(0)) remove();
+    this.scroll = null;
+    this.dragging = false;
+  }
+
+  _bindDom() {
+    const scroll = this.root?.getElementById("scroll");
+    if (scroll === this.scroll) return;
+    this.resizeObserver?.disconnect();
+    this._unbind();
+    this.scroll = scroll;
+    this.expectedTop = null;
+    this.pendingRestore = true;
+    if (!scroll) return;
+    this._listen(scroll, "scroll", () => this._onScroll());
+    this._listen(scroll, "wheel", event => {
+      if (event.deltaX || event.deltaY) this.onManualScroll();
+    });
+    this._listen(scroll, "touchmove", () => this.onManualScroll());
+    this._listen(scroll, "pointerdown", event => {
+      // Scrollbar/empty viewport; a click on an event/button isn't a scroll.
+      if (event.target === scroll) {
+        this.dragging = true;
+        this.onManualScroll();
+      }
+    });
+    this._listen(scroll.ownerDocument?.defaultView, "pointerup", () => { this.dragging = false; });
+    this._listen(scroll, "pointermove", event => {
+      if (event.buttons && this.state !== ScrollState.AUTO) this.inputUntil = Date.now() + 1500;
+    });
+    this._listen(scroll, "keydown", event => {
+      const target = event.target;
+      if (!SCROLL_KEYS.has(event.key) || target?.isContentEditable
+        || ["INPUT","TEXTAREA","SELECT","BUTTON"].includes(target?.tagName)) return;
+      this.onManualScroll();
+    });
+    this.resizeObserver?.observe(scroll);
+    // The viewport and its content may become measurable in different frames.
+    if (scroll.firstElementChild) this.resizeObserver?.observe(scroll.firstElementChild);
+  }
+
+  _apply() {
+    this._bindDom();
+    const scroll = this.scroll;
+    if (!scroll || scroll.clientHeight <= 0 || scroll.scrollHeight <= 0) {
+      this._fallbackRetry();
+      return;
+    }
     if (this.state === ScrollState.MANUAL_OVERRIDE && Date.now() >= this.manualUntil) {
       this.state = ScrollState.AUTO;
       this.manualUntil = 0;
       this.savedTop = null;
       this._clearReturnTimer();
     }
-    this.position("focus", true);
-  }
-
-  onDayChange() {
-    this.requestId++;
-
-    // A new calendar day is an explicit lifecycle boundary for automatic
-    // modes. Yesterday's viewport (including an active five-minute manual
-    // override) must never leak into the new day. Re-evaluate FOLLOW_NOW or
-    // FIXED immediately against the new day's DOM.
-    if (this.mode() === ScrollMode.NONE) {
-      // NONE means the user owns the viewport, so preserve it across midnight.
-      this._notify("day-change-static");
-      this.position("day-change-static", true);
-      return;
-    }
-
-    this._clearReturnTimer();
-    this.state = ScrollState.AUTO;
-    this.manualUntil = 0;
-    this.savedTop = null;
-    this.savedLeft = 0;
-    this._notify("day-change");
-    this.position("day-change", true);
-  }
-
-  onRender() {
-    // A HA/data/Lovelace render is NOT a state transition.
-    this.position("render", true);
-  }
-
-  _target(scroll) {
-    const mode = this.mode();
-    if (mode === ScrollMode.NONE) return null;
-
-    const maxScroll = Math.max(0, scroll.scrollHeight - scroll.clientHeight);
-    if (mode === ScrollMode.FOLLOW_NOW) {
-      const now = this.getNow();
-      const minutes = now.getHours() * 60 + now.getMinutes();
-      const nowY = (minutes / 60) * this.hourHeight;
-      return Math.max(0, Math.min(maxScroll, nowY - 8));
-    }
-
-    const fixedHour = Number(this.getFixedHour?.() ?? 6);
-    return Math.max(0, Math.min(maxScroll, fixedHour * this.hourHeight - 8));
-  }
-
-  _restoreManual(scroll, header) {
-    if (this.savedTop == null) return false;
-    const maxScroll = Math.max(0, scroll.scrollHeight - scroll.clientHeight);
-    this.programmaticUntil = Date.now() + 300;
-    scroll.scrollTop = Math.max(0, Math.min(maxScroll, this.savedTop));
-    scroll.scrollLeft = this.savedLeft || 0;
+    const manual = this.state !== ScrollState.AUTO || this.mode() === ScrollMode.NONE;
+    const desired = manual ? this.savedTop : this._target(scroll);
+    this.pendingRestore = false;
+    if (desired == null) return;
+    const top = Math.max(0, Math.min(scroll.scrollHeight - scroll.clientHeight, desired));
+    const left = this.savedLeft || 0;
+    // Explicit instant behavior also overrides inherited smooth scrolling.
+    if (typeof scroll.scrollTo === "function") scroll.scrollTo({top,left,behavior:"instant"});
+    else { scroll.scrollTop = top; scroll.scrollLeft = left; }
+    this.expectedTop = scroll.scrollTop;
+    if (!manual) this.savedTop = this.expectedTop;
+    const header = this.root?.getElementById("headerScroll");
     if (header) header.scrollLeft = scroll.scrollLeft;
-    return true;
+    this._notify(this.reason);
   }
 
-  position(reason = "render", force = false) {
-    const requestId = ++this.requestId;
-    const delays = force ? [0, 60, 140, 280, 500, 900] : [0];
+  _fallbackRetry() {
+    // Modern browsers wake via ResizeObserver/MutationObserver, including after
+    // an arbitrarily long hidden/loading period. Fallback has no startup cutoff.
+    if ((this.resizeObserver && this.mutationObserver) || this.retryTimer != null) return;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      this.position("layout-retry");
+    }, 500);
+  }
 
-    const attempt = (index) => {
-      if (requestId !== this.requestId) return;
-
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        if (requestId !== this.requestId) return;
-
-        const root = this.root;
-        const scroll = root?.getElementById("scroll");
-        const header = root?.getElementById("headerScroll");
-        if (!scroll || scroll.clientHeight <= 0 || scroll.scrollHeight <= scroll.clientHeight) {
-          if (index + 1 < delays.length) {
-            setTimeout(() => attempt(index + 1), delays[index + 1]);
-          }
-          return;
-        }
-
-        if (this.state === ScrollState.MANUAL_OVERRIDE) {
-          if (Date.now() < this.manualUntil) {
-            this._restoreManual(scroll, header);
-            this._scheduleReturn();
-            return;
-          }
-          this.state = ScrollState.AUTO;
-          this.manualUntil = 0;
-          this.savedTop = null;
-          this._clearReturnTimer();
-        }
-
-        if (this.state === ScrollState.MANUAL_STATIC || this.mode() === ScrollMode.NONE) {
-          this._restoreManual(scroll, header);
-          return;
-        }
-
-        const target = this._target(scroll);
-        if (target == null) return;
-        this.programmaticUntil = Date.now() + 300;
-        scroll.scrollTop = target;
-        this.savedTop = target;
-        this.savedLeft = scroll.scrollLeft || 0;
-        if (header) header.scrollLeft = scroll.scrollLeft;
-        this._notify(reason);
-      }));
-    };
-
-    attempt(0);
+  position(reason = "render", _force = false) {
+    if (this.destroyed) return;
+    this.reason = reason;
+    // Coalescing avoids a stream of renders cancelling all pending writes on
+    // slow CPUs. One frame always reconciles the latest DOM and state.
+    if (this.frame != null) return;
+    this.frame = requestAnimationFrame(() => {
+      this.frame = null;
+      if (!this.destroyed) this._apply();
+    });
   }
 
   attach(root) {
-    this.root = root;
-    this.onRender();
+    if (this.destroyed) return;
+    if (root !== this.root) {
+      this.mutationObserver?.disconnect();
+      this.root = root;
+      if (typeof MutationObserver === "function" && root) {
+        this.mutationObserver = new MutationObserver(() => {
+          if (this.root?.getElementById("scroll") !== this.scroll) {
+            this._bindDom();
+            this.position("dom-ready");
+          }
+        });
+        this.mutationObserver.observe(root, {childList:true,subtree:true});
+      }
+    }
+    if (!this.resizeObserver && typeof ResizeObserver === "function") {
+      this.resizeObserver = new ResizeObserver(() => this.position("layout-ready"));
+    }
+    this._bindDom();
+    this.position("attach");
   }
 }

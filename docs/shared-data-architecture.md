@@ -1,5 +1,5 @@
 # Shared configuration and data
-Implementation version: 0.5.3-dev.28 (development prerelease).
+Implementation version: 0.5.3-dev.29 (development prerelease).
 
 ## Ownership
 A WeakMap keyed by the authenticated Home Assistant connection owns one WeekPlannerStore per browser JavaScript realm. Panel, managed dashboard and Lovelace cards obtain that store through sharedStore(hass). A different connection gets a different store.
@@ -33,6 +33,21 @@ Health render signatures include source/status/error, not timestamps. Unchanged 
 Global configuration writes require Home Assistant administrator access. Nested rendering values and astronomy request sizes are validated. Moon computation runs in an executor; yearly sunlight calculation yields between dates and caches by year/location/timezone. Static-path and websocket registration flags belong to the Home Assistant instance and survive entry reloads.
 
 ## Validation
+
+### Scroll readiness (dev.29)
+Each view observes the scroll viewport and timeline content with ResizeObserver,
+and watches for replaced DOM nodes. Follow NOW waits for actual geometry with no
+two-second startup deadline. Position requests coalesce into one animation frame.
+Wheel/touch/scrollbar/keyboard input starts manual override; native scroll events
+alone cannot disable Follow NOW. Expected positions replace the old 300ms time
+window for identifying delayed programmatic scroll events. Scroll anchoring and
+smooth scrolling are disabled on the timeline viewport.
+
+Browser regression: scripts/verify_scroll_browser.mjs opens the actual panel and
+card with a mocked Home Assistant transport, throttles CPU by 6x, keeps the host
+hidden for seven seconds, then checks NOW positioning, unexpected resets, DOM
+replacement and real wheel input. CI installs Playwright 1.62.1 and runs it.
+This validates browser lifecycle/layout, not a live Home Assistant deployment.
 Run:
 - node --test tests/*.test.mjs
 - python -m unittest discover -s tests -p 'test_*.py'
