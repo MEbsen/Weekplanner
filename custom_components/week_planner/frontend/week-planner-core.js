@@ -17,10 +17,6 @@ class WeekPlannerPanel extends HTMLElement {
     this._loading = true;
     this._error = "";
     this._warnings = [];
-    this._refreshTimer = null;
-    this._calendarRefreshTimer = null;
-    this._calendarUnsubscribers = [];
-    this._calendarSubscriptionKey = "";
     this._nowTimer = null;
     this._lastKnownDayKey = "";
     this._isDashboardCard = false;
@@ -42,8 +38,10 @@ class WeekPlannerPanel extends HTMLElement {
   }
 
   set hass(value) {
+    const changedConnection = this._hass && this._hass.connection !== value?.connection;
     this._hass = value;
     if (!this._config) this._initialize();
+    else if (changedConnection && this.isConnected) this._recoverRuntime("connection");
   }
 
   set panel(value) {
@@ -55,44 +53,24 @@ class WeekPlannerPanel extends HTMLElement {
   }
 
   _startRuntimeTimers() {
-    if (!this._config || !this._hass) return;
-
-    if (!this._calendarRefreshTimer) {
-      this._calendarRefreshTimer = setInterval(
-        () => this._refreshCalendarEvents(false),
-        60 * 1000
-      );
-    }
-
-    if (!this._refreshTimer) {
-      this._refreshTimer = setInterval(async () => {
-        try {
-          const latestConfig = await this._hass.connection.sendMessagePromise({
-            type: "week_planner/config",
-          });
-          this._syncServerTime(latestConfig.server_time);
-        } catch (err) {
-          console.debug("Week Planner server-time resync failed", err);
-        }
-        const rolled = await this._handleDayRollover();
-        if (!rolled) await this._loadData(false);
-      }, 5 * 60 * 1000);
-    }
-
+    if (!this._config || !this._hass || !this.isConnected) return;
+    this._sharedStore().attach(this);
+    // NOW and scroll are local presentation. Network polling belongs to store.
     if (!this._nowTimer) {
-      this._nowTimer = setInterval(async () => {
+      this._lastAutoScrollHour = this._now().getHours();
+      this._nowTimer = setInterval(() => {
         this._updateNowIndicator();
-        await this._handleDayRollover();
-      }, 60 * 1000);
+        const hour = this._now().getHours();
+        if (hour !== this._lastAutoScrollHour && this._shouldFollowNow()) {
+          this._scrollToCurrentTime();
+        }
+        this._lastAutoScrollHour = hour;
+      }, 60000);
     }
   }
 
   _stopRuntimeTimers() {
-    if (this._refreshTimer) clearInterval(this._refreshTimer);
-    if (this._calendarRefreshTimer) clearInterval(this._calendarRefreshTimer);
     if (this._nowTimer) clearInterval(this._nowTimer);
-    this._refreshTimer = null;
-    this._calendarRefreshTimer = null;
     this._nowTimer = null;
   }
 
@@ -151,14 +129,7 @@ class WeekPlannerPanel extends HTMLElement {
       // Lovelace may detach and reattach the element without creating a new
       // instance. Restart everything that disconnectedCallback deliberately
       // stopped, and refresh stale overnight/day-boundary state.
-      this._handleDayRollover()
-        .then(() => this._setupCalendarSubscriptions())
-        .then(() => this._loadData(false))
-        .catch((err) => {
-          console.error("Week Planner reconnect refresh failed", err);
-          this._error = `Week Planner kunne ikke genoptage: ${err?.message || err}`;
-          this._render();
-        });
+      this._recoverRuntime("connected");
       this._startRuntimeTimers();
     }
   }
@@ -187,15 +158,8 @@ class WeekPlannerPanel extends HTMLElement {
     this._initializing = true;
     this._markRuntimeAttempt();
     try {
-      this._config = await this._hass.connection.sendMessagePromise({
-        type: "week_planner/config",
-      });
-      ensureWeekPlannerLovelaceResource(
-        this._hass,
-        this._config?.frontend_resource_url
-          || `/week_planner_static/week-planner.js?v=${this._config?.version || "0.5.0"}`
-      );
-
+      this._config = await this._getSharedConfig();
+      if (!this.isConnected) return;
       this._syncServerTime(this._config.server_time);
       this._config.calendar_colors ||= {};
       this._config.calendar_display_modes ||= {};
@@ -211,12 +175,13 @@ class WeekPlannerPanel extends HTMLElement {
       this._config.show_moon_markers ??= false;
       this._config.enlarge_today ??= true;
       this._config.view_mode ||= "week";
-      if (this._config.view_mode === "rolling") {
+      if (this._config.view_mode === "rolling" || this._isDashboardCard) {
         const today = this._now();
         today.setHours(0,0,0,0);
         this._weekStart = today;
       }
       await this._loadData();
+      if (!this.isConnected) return;
       await this._setupCalendarSubscriptions();
 
       this._lastKnownDayKey = this._dayKey(this._now());
@@ -270,6 +235,8 @@ class WeekPlannerPanel extends HTMLElement {
 
     this._markRuntimeAttempt();
     try {
+      this._config = await this._getSharedConfig(true);
+      if (!this.isConnected) return;
       await this._handleDayRollover();
       await this._setupCalendarSubscriptions();
       await this._loadData(false);
@@ -397,9 +364,10 @@ class WeekPlannerPanel extends HTMLElement {
   async _refreshCalendarEvents(showError = true) {
     if (!this._hass || !this._config) return;
 
-    const previousHealth = this._stableJson(this._healthSnapshot());
+    const previousHealth = this._healthRenderSignature();
     const result = await this._refreshCalendarEventsManaged();
-    const healthChanged = previousHealth !== this._stableJson(this._healthSnapshot());
+    if (result?.obsolete) return;
+    const healthChanged = previousHealth !== this._healthRenderSignature();
 
     if (result?.ok) {
       if (showError && this._error?.startsWith("Kalenderdata")) this._error = "";
@@ -412,77 +380,6 @@ class WeekPlannerPanel extends HTMLElement {
       this._render(false);
     } else if (healthChanged) {
       this._render(false);
-    }
-  }
-
-  _clearCalendarSubscriptions() {
-    for (const unsubscribe of this._calendarUnsubscribers || []) {
-      try {
-        unsubscribe?.();
-      } catch (err) {
-        console.debug("Week Planner calendar unsubscribe failed", err);
-      }
-    }
-    this._calendarUnsubscribers = [];
-    this._calendarSubscriptionKey = "";
-  }
-
-  async _setupCalendarSubscriptions() {
-    if (!this._hass?.connection || !this._config) return;
-
-    const calendars = this._config.calendar_entities || [];
-    const start = new Date(this._weekStart);
-    const end = this._addDays(start, this._dayCount());
-    const key = JSON.stringify([
-      calendars,
-      this._isoLocal(start),
-      this._isoLocal(end),
-    ]);
-
-    if (key === this._calendarSubscriptionKey) return;
-
-    this._clearCalendarSubscriptions();
-    this._calendarSubscriptionKey = key;
-
-    if (!calendars.length || typeof this._hass.connection.subscribeMessage !== "function") {
-      return;
-    }
-
-    for (const entityId of calendars) {
-      try {
-        const unsubscribe = await this._hass.connection.subscribeMessage(
-          (payload) => {
-            // HA's websocket client normally delivers the inner subscription
-            // payload. Be tolerant of a wrapped event shape as well.
-            const events = payload?.events ?? payload?.event?.events;
-            if (!Array.isArray(events)) return;
-
-            const nextEvents = {
-              ...(this._dataManager().events || {}),
-              [entityId]: { events },
-            };
-
-            const manager = this._dataManager();
-            const changed = manager.changed(manager.events || {}, nextEvents);
-            manager.events = nextEvents;
-
-            if (changed) {
-              this._render(false);
-            }
-          },
-          {
-            type: "calendar/event/subscribe",
-            entity_id: entityId,
-            start: this._isoLocal(start),
-            end: this._isoLocal(end),
-          }
-        );
-        if (typeof unsubscribe === "function") {
-          this._calendarUnsubscribers.push(unsubscribe);
-        }
-      } catch (err) {
-        console.debug(`Week Planner subscription failed for ${entityId}`, err);
-      }
     }
   }
 
@@ -562,10 +459,11 @@ class WeekPlannerPanel extends HTMLElement {
 
     const previousWarnings = this._warnings || [];
     const previousError = this._error || "";
-    const previousHealth = this._stableJson(this._healthSnapshot());
+    const previousHealth = this._healthRenderSignature();
 
     try {
       const result = await this._loadDataManaged();
+      if (result?.obsolete) return;
       this._warnings = result?.warnings || [];
       this._error = result?.error || "";
       this._loading = false;
@@ -573,7 +471,7 @@ class WeekPlannerPanel extends HTMLElement {
       const statusChanged =
         previousError !== this._error ||
         this._stableJson(previousWarnings) !== this._stableJson(this._warnings) ||
-        previousHealth !== this._stableJson(this._healthSnapshot());
+        previousHealth !== this._healthRenderSignature();
 
       if (showLoading || result?.changed || statusChanged) {
         this._render();
@@ -1731,7 +1629,7 @@ class WeekPlannerPanel extends HTMLElement {
             </div>
             <div class="nav">
               <div class="health-strip" id="healthStrip">${this._healthIconMarkup()}</div>
-              <button id="configure" title="Skift vejr og kalendere">⚙ Konfigurer</button>
+              ${this._hass?.user?.is_admin ? '<button id="configure" title="Skift vejr og kalendere">⚙ Konfigurer</button>' : ""}
             ${this._config?.weather_display && this._config.weather_display !== "none"
               ? `<button id="toggleWeather" class="layer-toggle ${this._weatherVisibleNow() ? "active" : "off"}" title="Vis/skjul vejr">☁</button>`
               : ""}
@@ -2232,6 +2130,7 @@ class WeekPlannerPanel extends HTMLElement {
   }
 
   _showSettings() {
+    if (!this._hass?.user?.is_admin) return;
     this._settingsOpen = true;
     this._renderPendingWhileSettingsOpen = false;
 
@@ -2675,7 +2574,6 @@ class WeekPlannerPanel extends HTMLElement {
 
         const persistedConfig = saveResult.config;
         const modeChanged = this._config.view_mode !== persistedConfig.view_mode;
-        const scrollModeChanged = (this._config.scroll_mode || "fixed") !== (persistedConfig.scroll_mode || "fixed");
 
         // Use the configuration read back from Home Assistant, not the local
         // form values. This makes the panel reflect only confirmed persistence.
@@ -2693,9 +2591,8 @@ class WeekPlannerPanel extends HTMLElement {
         if (modeChanged) {
           this._weekStart = this._startOfView(this._now());
         }
-        const verifiedConfig = await this._hass.connection.sendMessagePromise({
-          type: "week_planner/config",
-        });
+        this._applySharedConfig(persistedConfig);
+        const verifiedConfig = await this._getSharedConfig(true);
 
         this._config = {
           ...this._config,
@@ -2708,9 +2605,6 @@ class WeekPlannerPanel extends HTMLElement {
           show_energy_prices: verifiedConfig.show_energy_prices ?? false,
         };
         this._syncServerTime(verifiedConfig.server_time);
-
-        if (scrollModeChanged) {
-              }
 
         const expectedHistory = JSON.stringify(historySources);
         const actualHistory = JSON.stringify(verifiedConfig.history_sources || []);
@@ -2781,56 +2675,13 @@ if (!customElements.get("week-planner-panel")) {
  * Only dashboard-specific presentation is configured on the card itself.
  */
 
-async function ensureWeekPlannerLovelaceResource(hass, resourceUrl) {
-  if (!hass || !resourceUrl) return;
-
-  // Home Assistant exposes Lovelace resources through its WebSocket API.
-  // If unavailable (e.g. storage mode differences), fail silently; the panel
-  // itself still works and manual resource registration remains a fallback.
-  try {
-    const resources = await hass.connection.sendMessagePromise({
-      type: "lovelace/resources",
-    });
-
-    const list = Array.isArray(resources) ? resources : (resources?.resources || []);
-    const basePath = "/week_planner_static/week-planner.js";
-
-    const existing = list.find((item) => {
-      const url = item?.url || "";
-      return url === basePath || url.startsWith(basePath + "?");
-    });
-
-    if (!existing) {
-      await hass.connection.sendMessagePromise({
-        type: "lovelace/resources/create",
-        res_type: "module",
-        url: resourceUrl,
-      });
-      return;
-    }
-
-    if (existing.url !== resourceUrl && existing.id) {
-      await hass.connection.sendMessagePromise({
-        type: "lovelace/resources/update",
-        resource_id: existing.id,
-        res_type: existing.type || "module",
-        url: resourceUrl,
-      });
-    }
-  } catch (err) {
-    console.debug("Week Planner: Lovelace resource auto-registration unavailable", err);
-  }
-}
-
-
-
 /**
  * Native Week Planner dashboard host.
  *
  * This element is intentionally separate from WeekPlannerCard:
  * - It uses the integration's central/full-screen Week Planner configuration.
  * - It keeps the panel's 7-day navigation semantics and all panel features.
- * - The normal WeekPlannerCard remains independently configurable for other dashboards.
+ * - Cards share configuration/data and customize their own presentation.
  */
 class WeekPlannerDashboardCard extends WeekPlannerPanel {
   constructor() {
@@ -2931,16 +2782,15 @@ class WeekPlannerCard extends WeekPlannerPanel {
     const scrollConfigChanged =
       previousScrollSignature !== null &&
       previousScrollSignature !== nextScrollSignature;
-    const firstCardConfig = previousScrollSignature === null;
     this._lastCardScrollSignature = nextScrollSignature;
-
-    if (firstCardConfig || scrollConfigChanged) {
-    }
 
     this._applyViewportHeight();
 
     if (this._config) {
       this._render(false);
+      if (this.isConnected && scrollConfigChanged) {
+        this._loadData(false).then(() => this._setupCalendarSubscriptions());
+      }
     }
   }
 
@@ -2974,26 +2824,6 @@ class WeekPlannerCard extends WeekPlannerPanel {
     this.style.height = `${resolved}px`;
     this.style.maxHeight = `${resolved}px`;
     this.style.minHeight = `${resolved}px`;
-  }
-
-  _render(allowScroll = true) {
-    const oldVisibility = {
-      ...(this._sessionVisibility || { weather:true, sun:true, energy:true }),
-    };
-    this._sessionVisibility = {
-      weather: !this._cardConfig.hide_weather,
-      sun: !this._cardConfig.hide_sun,
-      energy: !this._cardConfig.hide_energy,
-    };
-
-    super._render(allowScroll);
-
-    this._sessionVisibility = oldVisibility;
-
-    requestAnimationFrame(() => {
-      this._applyViewportHeight();
-      this._applyCardPresentation();
-    });
   }
 
   _applyCardPresentation() {
@@ -3052,41 +2882,6 @@ class WeekPlannerCardEditor extends HTMLElement {
     this._render();
   }
 
-  setConfig(config) {
-    const incoming = config || {};
-    this._config = {
-      ...incoming,
-      height: Number(incoming.height ?? 700),
-      show_toolbar: incoming.show_toolbar !== false,
-      adopt_panel: incoming.adopt_panel !== false,
-      hide_weather: Boolean(incoming.hide_weather),
-      hide_sun: Boolean(incoming.hide_sun),
-      hide_energy: Boolean(incoming.hide_energy),
-      calendar_entities: Array.isArray(incoming.calendar_entities) ? incoming.calendar_entities : [],
-      calendar_colors: incoming.calendar_colors && typeof incoming.calendar_colors === "object"
-        ? incoming.calendar_colors
-        : {},
-      calendar_avatars: incoming.calendar_avatars && typeof incoming.calendar_avatars === "object"
-        ? incoming.calendar_avatars
-        : {},
-      days_to_show: Number.isFinite(Number(incoming.days_to_show))
-        ? Math.min(14, Math.max(1, Math.round(Number(incoming.days_to_show))))
-        : 7,
-      weather_entity: incoming.weather_entity || "",
-      weather_display: incoming.weather_display || "none",
-      show_sun_markers: Boolean(incoming.show_sun_markers),
-      show_moon_markers: Boolean(incoming.show_moon_markers),
-      energy_entity: incoming.energy_entity || "",
-      show_energy_prices: Boolean(incoming.show_energy_prices),
-      show_week_number: incoming.show_week_number !== false,
-      enlarge_today: incoming.enlarge_today !== false,
-      view_mode: incoming.view_mode === "rolling" ? "rolling" : "week",
-      default_scroll_hour: Number(incoming.default_scroll_hour ?? 6),
-      scroll_mode: ["none", "fixed", "follow_now"].includes(incoming.scroll_mode) ? incoming.scroll_mode : "fixed",
-    };
-    this._render();
-  }
-
   _emitConfig() {
     this.dispatchEvent(new CustomEvent("config-changed", {
       detail: { config: { ...this._config } },
@@ -3095,347 +2890,6 @@ class WeekPlannerCardEditor extends HTMLElement {
     }));
   }
 
-  _render() {
-    if (!this.shadowRoot) return;
-
-    const states = Object.values(this._hass?.states || {});
-    const label = (s) => s.attributes?.friendly_name || s.entity_id;
-    const esc = (v) => String(v ?? "")
-      .replaceAll("&","&amp;").replaceAll("<","&lt;")
-      .replaceAll(">","&gt;").replaceAll('"',"&quot;");
-
-    const weatherEntities = states.filter((s) => s.entity_id.startsWith("weather.")).sort((a,b) => label(a).localeCompare(label(b)));
-    const calendarEntities = states.filter((s) => s.entity_id.startsWith("calendar.")).sort((a,b) => label(a).localeCompare(label(b)));
-    const sensorEntities = states.filter((s) => s.entity_id.startsWith("sensor.")).sort((a,b) => label(a).localeCompare(label(b)));
-
-    const selectedCalendars = new Set(this._config.calendar_entities || []);
-    const weatherOptions = weatherEntities.map((s) =>
-      `<option value="${esc(s.entity_id)}" ${s.entity_id === this._config.weather_entity ? "selected" : ""}>${esc(label(s))}</option>`
-    ).join("");
-    const calendarOptions = calendarEntities.map((s) =>
-      `<option value="${esc(s.entity_id)}" ${selectedCalendars.has(s.entity_id) ? "selected" : ""}>${esc(label(s))}</option>`
-    ).join("");
-    const energyOptions = sensorEntities.map((s) =>
-      `<option value="${esc(s.entity_id)}" ${s.entity_id === this._config.energy_entity ? "selected" : ""}>${esc(label(s))}</option>`
-    ).join("");
-
-    const calendarStyleRows = (this._config.calendar_entities || []).map((entityId) => {
-      const entity = this._hass?.states?.[entityId];
-      const friendly = entity?.attributes?.friendly_name || entityId;
-      const color = this._config.calendar_colors?.[entityId] || "#4f8cff";
-      const avatar = this._config.calendar_avatars?.[entityId] || "";
-      const type = avatar.startsWith("mdi:") ? "mdi" : (avatar ? "entity" : "none");
-
-      return `
-        <div class="calendar-style-row" data-calendar-style-row="${esc(entityId)}">
-          <div class="calendar-style-name">
-            <strong>${esc(friendly)}</strong>
-            <span>${esc(entityId)}</span>
-          </div>
-
-          <input type="color"
-                 class="calendar-style-color"
-                 data-calendar-color="${esc(entityId)}"
-                 value="${esc(color)}"
-                 title="Kalenderfarve">
-
-          <select data-calendar-icon-type="${esc(entityId)}">
-            <option value="none" ${type === "none" ? "selected" : ""}>Intet ikon</option>
-            <option value="mdi" ${type === "mdi" ? "selected" : ""}>MDI-ikon</option>
-            <option value="entity" ${type === "entity" ? "selected" : ""}>HA-entity/avatar</option>
-          </select>
-
-          <ha-icon-picker
-            data-calendar-mdi="${esc(entityId)}"
-            class="${type === "mdi" ? "" : "hidden"}">
-          </ha-icon-picker>
-
-          <ha-entity-picker
-            data-calendar-avatar="${esc(entityId)}"
-            class="${type === "entity" ? "" : "hidden"}">
-          </ha-entity-picker>
-        </div>
-      `;
-    }).join("");
-
-    const independent = this._config.adopt_panel === false;
-
-    this.shadowRoot.innerHTML = `
-      <style>
-        :host { display:block; color:var(--primary-text-color); }
-        .editor { display:grid; gap:14px; padding:8px 0; }
-        .box { display:grid; gap:11px; padding:12px; border:1px solid var(--divider-color); border-radius:9px; }
-        .field { display:grid; gap:5px; }
-        .title, label { font-size:13px; font-weight:500; }
-        .hint { color:var(--secondary-text-color); font-size:12px; line-height:1.4; }
-        .toggle { display:flex; align-items:center; gap:8px; }
-        input[type="number"], select {
-          width:100%; box-sizing:border-box; padding:9px; border-radius:8px;
-          border:1px solid var(--divider-color); color:var(--primary-text-color);
-          background:var(--card-background-color); font:inherit;
-        }
-        select[multiple] { min-height:120px; }
-        .calendar-style-list { display:grid; gap:8px; }
-        .calendar-style-row {
-          display:grid;
-          grid-template-columns:minmax(150px,1fr) 44px minmax(130px,160px);
-          gap:8px;
-          align-items:center;
-          padding:9px;
-          border:1px solid var(--divider-color);
-          border-radius:8px;
-        }
-        .calendar-style-name {
-          min-width:0;
-          display:grid;
-          gap:2px;
-        }
-        .calendar-style-name span {
-          font-size:11px;
-          color:var(--secondary-text-color);
-          white-space:nowrap;
-          overflow:hidden;
-          text-overflow:ellipsis;
-        }
-        .calendar-style-color {
-          width:42px;
-          height:32px;
-          border:0;
-          padding:0;
-          background:none;
-        }
-        .calendar-style-row ha-icon-picker,
-        .calendar-style-row ha-entity-picker {
-          grid-column:1 / -1;
-        }
-        .hidden { display:none !important; }
-      </style>
-
-      <div class="editor">
-        <div class="field">
-          <label for="height">Card-højde</label>
-          <input id="height" type="number" min="320" max="1600" step="20" value="${Number(this._config.height || 700)}">
-        </div>
-
-        <label class="toggle"><input id="toolbar" type="checkbox" ${this._config.show_toolbar ? "checked" : ""}><span>Vis Week Planner-toolbar</span></label>
-        <label class="toggle"><input id="adoptPanel" type="checkbox" ${this._config.adopt_panel ? "checked" : ""}><span>Adoptér/gengiv main panelet</span></label>
-        <div class="hint">Slå adoption fra for at bruge dette cards egen konfiguration. Alle datakilder er valgfrie.</div>
-
-        <div class="box ${independent ? "hidden" : ""}">
-          <div class="title">Visning af main panelet</div>
-          <label class="toggle"><input id="hideWeather" type="checkbox" ${this._config.hide_weather ? "checked" : ""}><span>Skjul vejr</span></label>
-          <label class="toggle"><input id="hideSun" type="checkbox" ${this._config.hide_sun ? "checked" : ""}><span>Skjul sol/dagslængde</span></label>
-          <label class="toggle"><input id="hideEnergy" type="checkbox" ${this._config.hide_energy ? "checked" : ""}><span>Skjul elpris</span></label>
-        </div>
-
-        <div class="box ${independent ? "" : "hidden"}">
-          <div class="title">Dette cards egen konfiguration</div>
-
-          <div class="field">
-            <label for="cardCalendars">Kalendere</label>
-            <select id="cardCalendars" multiple>${calendarOptions}</select>
-            <div class="hint">Ingen valg = tom planner. Ctrl/Cmd + klik vælger flere.</div>
-          </div>
-          <div class="field">
-            <label>Farve og event-ikon pr. kalender</label>
-            <div class="calendar-style-list">
-              ${calendarStyleRows || '<div class="hint">Vælg en eller flere kalendere ovenfor.</div>'}
-            </div>
-          </div>
-
-          <div class="field">
-            <label for="cardWeather">Vejrkilde</label>
-            <select id="cardWeather"><option value="">Ingen</option>${weatherOptions}</select>
-          </div>
-          <div class="field">
-            <label for="cardWeatherMode">Vejrvisning</label>
-            <select id="cardWeatherMode">
-              <option value="none" ${this._config.weather_display === "none" ? "selected" : ""}>Ingen</option>
-              <option value="hourly" ${this._config.weather_display === "hourly" ? "selected" : ""}>Timer</option>
-              <option value="daily" ${this._config.weather_display === "daily" ? "selected" : ""}>Dage</option>
-              <option value="both" ${this._config.weather_display === "both" ? "selected" : ""}>Begge</option>
-            </select>
-          </div>
-
-          <label class="toggle"><input id="cardSun" type="checkbox" ${this._config.show_sun_markers ? "checked" : ""}><span>Vis sol/dagslængde</span></label>
-          <label class="toggle"><input id="cardMoon" type="checkbox" ${this._config.show_moon_markers ? "checked" : ""}><span>Vis månefaseskift</span></label>
-
-          <div class="field">
-            <label for="cardEnergy">Elpris-sensor</label>
-            <select id="cardEnergy"><option value="">Ingen</option>${energyOptions}</select>
-          </div>
-          <label class="toggle"><input id="cardEnergyShow" type="checkbox" ${this._config.show_energy_prices ? "checked" : ""}><span>Vis elpriser</span></label>
-
-          <label class="toggle"><input id="cardWeekNumber" type="checkbox" ${this._config.show_week_number ? "checked" : ""}><span>Vis ugenummer</span></label>
-          <label class="toggle"><input id="cardEnlargeToday" type="checkbox" ${this._config.enlarge_today ? "checked" : ""}><span>Fremhæv i dag</span></label>
-
-          <div class="field">
-            <label for="cardViewMode">Periode</label>
-            <select id="cardViewMode">
-              <option value="week" ${this._config.view_mode === "week" ? "selected" : ""}>Kalenderuge</option>
-              <option value="rolling" ${this._config.view_mode === "rolling" ? "selected" : ""}>I dag + 6 dage</option>
-            </select>
-          </div>
-
-          <div class="field">
-            <label for="cardDaysToShow">Antal dage</label>
-            <input id="cardDaysToShow" type="number" min="1" max="14" step="1"
-                   value="${Number(this._config.days_to_show ?? 7)}">
-            <div class="hint">Card’et viser altid i dag + det valgte antal dage i alt.</div>
-          </div>
-
-          <div class="field">
-            <label for="cardScrollMode">Auto-scroll</label>
-            <select id="cardScrollMode">
-              <option value="none" ${this._config.scroll_mode === "none" ? "selected" : ""}>Ingen auto-scroll</option>
-              <option value="fixed" ${this._config.scroll_mode === "fixed" ? "selected" : ""}>Scroll til angivet time</option>
-              <option value="follow_now" ${this._config.scroll_mode === "follow_now" ? "selected" : ""}>Følg NU</option>
-            </select>
-          </div>
-
-          <div class="field ${this._config.scroll_mode === "fixed" ? "" : "hidden"}" id="cardScrollHourRow">
-            <label for="cardScrollHour">Tidspunkt</label>
-            <input id="cardScrollHour" type="number" min="0" max="23" step="1" value="${Number(this._config.default_scroll_hour ?? 6)}">
-          </div>
-
-          <div class="hint">Scroll til angivet time og Følg NU holder måltidspunktet så højt i viewet som muligt, så mest muligt af resten af dagen er synligt.</div>
-        </div>
-      </div>
-    `;
-
-    const emit = () => this._emitConfig();
-    const bindCheck = (id, key) => this.shadowRoot.getElementById(id)?.addEventListener("change", (e) => {
-      this._config[key] = Boolean(e.target.checked);
-      emit();
-    });
-
-    this.shadowRoot.getElementById("height")?.addEventListener("change", (e) => {
-      const value = Number(e.target.value);
-      this._config.height = Number.isFinite(value) ? Math.min(1600, Math.max(320, value)) : 700;
-      emit();
-    });
-    bindCheck("toolbar", "show_toolbar");
-    bindCheck("hideWeather", "hide_weather");
-    bindCheck("hideSun", "hide_sun");
-    bindCheck("hideEnergy", "hide_energy");
-    bindCheck("cardSun", "show_sun_markers");
-    bindCheck("cardMoon", "show_moon_markers");
-    bindCheck("cardEnergyShow", "show_energy_prices");
-    bindCheck("cardWeekNumber", "show_week_number");
-    bindCheck("cardEnlargeToday", "enlarge_today");
-
-    this.shadowRoot.getElementById("adoptPanel")?.addEventListener("change", (e) => {
-      this._config.adopt_panel = Boolean(e.target.checked);
-      emit();
-      this._render();
-    });
-    this.shadowRoot.getElementById("cardCalendars")?.addEventListener("change", (e) => {
-      this._config.calendar_entities = [...e.target.selectedOptions].map((o) => o.value);
-      emit();
-      this._render();
-    });
-    this.shadowRoot.getElementById("cardWeather")?.addEventListener("change", (e) => {
-      this._config.weather_entity = e.target.value || "";
-      emit();
-    });
-    this.shadowRoot.getElementById("cardWeatherMode")?.addEventListener("change", (e) => {
-      this._config.weather_display = e.target.value || "none";
-      emit();
-    });
-    this.shadowRoot.getElementById("cardEnergy")?.addEventListener("change", (e) => {
-      this._config.energy_entity = e.target.value || "";
-      emit();
-    });
-    this.shadowRoot.getElementById("cardViewMode")?.addEventListener("change", (e) => {
-      this._config.view_mode = e.target.value === "rolling" ? "rolling" : "week";
-      emit();
-    });
-    this.shadowRoot.getElementById("cardDaysToShow")?.addEventListener("change", (e) => {
-      this._config.days_to_show = Math.min(
-        14,
-        Math.max(1, Math.round(Number(e.target.value || 7)))
-      );
-      emit();
-    });
-
-    this.shadowRoot.getElementById("cardScrollMode")?.addEventListener("change", (e) => {
-      this._config.scroll_mode = ["none", "fixed", "follow_now"].includes(e.target.value)
-        ? e.target.value
-        : "fixed";
-      emit();
-      this._render();
-    });
-
-    this.shadowRoot.getElementById("cardScrollHour")?.addEventListener("change", (e) => {
-      this._config.default_scroll_hour = Math.min(23, Math.max(0, Number(e.target.value || 6)));
-      emit();
-    });
-
-    this.shadowRoot.querySelectorAll("[data-calendar-color]").forEach((el) => {
-      el.addEventListener("change", (e) => {
-        const entityId = e.target.dataset.calendarColor;
-        this._config.calendar_colors = { ...(this._config.calendar_colors || {}) };
-        this._config.calendar_colors[entityId] = e.target.value;
-        emit();
-      });
-    });
-
-    this.shadowRoot.querySelectorAll("[data-calendar-icon-type]").forEach((typeEl) => {
-      const entityId = typeEl.dataset.calendarIconType;
-      const mdiPicker = this.shadowRoot.querySelector(`[data-calendar-mdi="${entityId}"]`);
-      const avatarPicker = this.shadowRoot.querySelector(`[data-calendar-avatar="${entityId}"]`);
-
-      const current = this._config.calendar_avatars?.[entityId] || "";
-      if (mdiPicker) {
-        mdiPicker.value = current.startsWith("mdi:") ? current : "";
-      }
-      if (avatarPicker) {
-        avatarPicker.hass = this._hass;
-        avatarPicker.value = current && !current.startsWith("mdi:") ? current : undefined;
-      }
-
-      const updateVisibility = () => {
-        mdiPicker?.classList.toggle("hidden", typeEl.value !== "mdi");
-        avatarPicker?.classList.toggle("hidden", typeEl.value !== "entity");
-      };
-
-      typeEl.addEventListener("change", () => {
-        this._config.calendar_avatars = { ...(this._config.calendar_avatars || {}) };
-
-        if (typeEl.value === "none") {
-          delete this._config.calendar_avatars[entityId];
-        } else if (typeEl.value === "mdi") {
-          const value = mdiPicker?.value || "mdi:calendar";
-          this._config.calendar_avatars[entityId] = value;
-        } else {
-          const value = avatarPicker?.value || "";
-          if (value) this._config.calendar_avatars[entityId] = value;
-          else delete this._config.calendar_avatars[entityId];
-        }
-
-        updateVisibility();
-        emit();
-      });
-
-      mdiPicker?.addEventListener("value-changed", (e) => {
-        const value = e.detail?.value ?? mdiPicker.value ?? "";
-        this._config.calendar_avatars = { ...(this._config.calendar_avatars || {}) };
-        if (value) this._config.calendar_avatars[entityId] = value;
-        else delete this._config.calendar_avatars[entityId];
-        emit();
-      });
-
-      avatarPicker?.addEventListener("value-changed", (e) => {
-        const value = e.detail?.value ?? avatarPicker.value ?? "";
-        this._config.calendar_avatars = { ...(this._config.calendar_avatars || {}) };
-        if (value) this._config.calendar_avatars[entityId] = value;
-        else delete this._config.calendar_avatars[entityId];
-        emit();
-      });
-
-      updateVisibility();
-    });
-  }
 
 }
 
@@ -3447,14 +2901,14 @@ if (!customElements.get("week-planner-card")) {
   customElements.define("week-planner-card", WeekPlannerCard);
 }
 
-window.weekPlannerFrontendVersion = "0.5.3-dev.12";
+window.weekPlannerFrontendVersion = "0.5.3-dev.28";
 window.customCards = window.customCards || [];
 
 if (!window.customCards.some((card) => card.type === "week-planner-card")) {
   window.customCards.push({
     type: "week-planner-card",
     name: "Week Planner Card",
-    description: "Week Planner dashboard card · frontend v0.5.3-dev.12",
+    description: "Week Planner dashboard card · frontend v0.5.3-dev.28",
     preview: false,
   });
 }

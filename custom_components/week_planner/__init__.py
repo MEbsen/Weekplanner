@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, time, timedelta, timezone
+import asyncio
 import logging
 from pathlib import Path
 
@@ -63,9 +64,6 @@ from .const import (
     VIEW_MODE_WEEK,
 )
 
-_FRONTEND_REGISTERED = False
-_WS_REGISTERED = False
-
 _LOGGER = logging.getLogger(__name__)
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -75,15 +73,14 @@ _DASHBOARD_CARD_TYPE = "custom:week-planner-dashboard-card"
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the integration domain."""
-    global _WS_REGISTERED
-
-    if not _WS_REGISTERED:
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if not domain_data.get("_ws_registered"):
         websocket_api.async_register_command(hass, websocket_get_config)
         websocket_api.async_register_command(hass, websocket_update_config)
         websocket_api.async_register_command(hass, websocket_get_sun_times)
         websocket_api.async_register_command(hass, websocket_get_moon_transitions)
         websocket_api.async_register_command(hass, websocket_get_daylight_extrema)
-        _WS_REGISTERED = True
+        domain_data["_ws_registered"] = True
 
     return True
 
@@ -228,14 +225,13 @@ async def _async_ensure_native_dashboard(hass: HomeAssistant) -> None:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Week Planner from a config entry."""
-    global _FRONTEND_REGISTERED
-
-    if not _FRONTEND_REGISTERED:
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if not domain_data.get("_frontend_registered"):
         frontend_dir = Path(__file__).parent / "frontend"
         await hass.http.async_register_static_paths(
             [StaticPathConfig(STATIC_URL, str(frontend_dir), False)]
         )
-        _FRONTEND_REGISTERED = True
+        domain_data["_frontend_registered"] = True
 
     await _async_ensure_lovelace_resource(hass)
     await _async_ensure_native_dashboard(hass)
@@ -255,8 +251,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except Exception:
         pass
 
-    global _FRONTEND_REGISTERED
-    _FRONTEND_REGISTERED = False
     return True
 
 
@@ -300,10 +294,16 @@ def _frontend_settings(hass: HomeAssistant, entry: ConfigEntry) -> dict:
         vol.Required("type"): "week_planner/update_config",
         vol.Optional("weather_entity", default=""): str,
         vol.Optional("calendar_entities", default=[]): [str],
-        vol.Optional("calendar_colors", default={}): dict,
-        vol.Optional("calendar_display_modes", default={}): dict,
+        vol.Optional("calendar_colors", default={}): {str: vol.Match(r"^#[0-9a-fA-F]{6}$")},
+        vol.Optional("calendar_display_modes", default={}): {str: vol.In(["auto", "timeline", "ribbon"])},
         vol.Optional("calendar_avatars", default={}): dict,
-        vol.Optional("history_sources", default=[]): [dict],
+        vol.Optional("history_sources", default=[]): vol.All(
+            [{
+                vol.Required("entity_id"): str,
+                vol.Optional("color", default="#7f858d"): vol.Match(r"^#[0-9a-fA-F]{6}$"),
+            }],
+            vol.Length(max=64),
+        ),
         vol.Optional("energy_entity", default=""): str,
         vol.Optional("show_energy_prices", default=False): bool,
         vol.Optional("weather_display", default=WEATHER_DISPLAY_BOTH): vol.In(
@@ -320,6 +320,7 @@ def _frontend_settings(hass: HomeAssistant, entry: ConfigEntry) -> dict:
         vol.Optional("view_mode", default=VIEW_MODE_WEEK): vol.In(["week", "rolling"]),
     }
 )
+@websocket_api.require_admin
 @websocket_api.async_response
 async def websocket_update_config(hass: HomeAssistant, connection, msg) -> None:
     """Update Week Planner configuration from the panel."""
@@ -429,13 +430,14 @@ def _daylight_minutes_for_date(hass: HomeAssistant, local_date):
     return round((sunset - sunrise).total_seconds() / 60)
 
 
-def _year_daylight_extrema(hass: HomeAssistant, year: int):
+async def _year_daylight_extrema(hass: HomeAssistant, year: int):
     """Calculate and cache min/max daylight length for a year."""
     from datetime import date, timedelta
 
     cache = hass.data.setdefault(DOMAIN, {}).setdefault("_daylight_extrema", {})
-    if year in cache:
-        return cache[year]
+    cache_key = (year, hass.config.latitude, hass.config.longitude, hass.config.time_zone)
+    if cache_key in cache:
+        return cache[cache_key]
 
     current = date(year, 1, 1)
     end = date(year + 1, 1, 1)
@@ -452,6 +454,7 @@ def _year_daylight_extrema(hass: HomeAssistant, year: int):
                 maximum = minutes
                 maximum_date = current
         current += timedelta(days=1)
+        await asyncio.sleep(0)
 
     result = {
         "min_minutes": minimum,
@@ -459,7 +462,7 @@ def _year_daylight_extrema(hass: HomeAssistant, year: int):
         "min_date": minimum_date.isoformat() if minimum_date else None,
         "max_date": maximum_date.isoformat() if maximum_date else None,
     }
-    cache[year] = result
+    cache[cache_key] = result
     return result
 
 
@@ -560,7 +563,9 @@ async def websocket_get_moon_transitions(hass: HomeAssistant, connection, msg) -
         start_utc = start.astimezone(timezone.utc)
         end_utc = end.astimezone(timezone.utc)
 
-        result = _moon_transitions(start_utc, end_utc)
+        if not (timedelta(0) < end_utc - start_utc <= timedelta(days=32)):
+            raise ValueError("Interval must be positive and at most 32 days")
+        result = await hass.async_add_executor_job(_moon_transitions, start_utc, end_utc)
         connection.send_result(msg["id"], result)
     except (ValueError, TypeError) as err:
         connection.send_error(msg["id"], "invalid_range", str(err))
@@ -569,7 +574,10 @@ async def websocket_get_moon_transitions(hass: HomeAssistant, connection, msg) -
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "week_planner/daylight_extrema",
-        vol.Required("years"): [vol.Coerce(int)],
+        vol.Required("years"): vol.All(
+            [vol.All(vol.Coerce(int), vol.Range(min=1900, max=2200))],
+            vol.Length(min=1, max=2),
+        ),
     }
 )
 @websocket_api.async_response
@@ -578,14 +586,14 @@ async def websocket_get_daylight_extrema(hass: HomeAssistant, connection, msg) -
     result = {}
     for year in sorted(set(msg["years"])):
         if 1900 <= year <= 2200:
-            result[str(year)] = _year_daylight_extrema(hass, year)
+            result[str(year)] = await _year_daylight_extrema(hass, year)
     connection.send_result(msg["id"], result)
 
 
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "week_planner/sun_times",
-        vol.Required("dates"): [str],
+        vol.Required("dates"): vol.All([str], vol.Length(min=1, max=32)),
     }
 )
 @websocket_api.async_response

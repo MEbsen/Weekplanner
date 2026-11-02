@@ -1,83 +1,28 @@
 # Week Planner for Home Assistant
 
-An experimental seven-day calendar panel for Home Assistant with hourly weather integrated directly into each day's timeline.
+Week Planner displays calendars, weather, sun/moon, energy prices and entity history in a native dashboard or Lovelace card.
 
-## Version 0.4.2
+Current local development version: **0.5.3-dev.28**. This implementation has not been published to HACS.
 
-Current prototype features:
+Panel and cards share integration configuration, data cache, identical requests and calendar subscriptions through one store per Home Assistant connection. Each view independently controls its date range, layout, visible layers, height and scroll. Separate tabs/devices have separate runtime caches.
 
-- Seven-day week view
-- One-hour visual grid
-- 30-minute snap guide lines
-- Current day highlighted
-- Moving current-time line
-- Automatic scroll around the current time
-- Hourly weather icons + temperature
-- Click weather for details
-- Calendar events from one or more Home Assistant calendar entities
-- Click events for details
-- Completed events are faded
-- Past portion of the current day is subtly faded
-- Previous / next week navigation
+## Configuration and installation
 
-### Not implemented yet
+Add the repository https://github.com/MEbsen/Weekplanner as a HACS custom repository with category Integration, or copy custom_components/week_planner into /config/custom_components/week_planner for manual testing. Restart Home Assistant and add the Week Planner integration under Settings → Devices & services.
 
-- Editing/creating/deleting events
-- Drag/drop
-- Resize
-- Overlapping-event column layout
-- All-day event row
-- Weather history
-- HACS default-store publication
+Configure data sources centrally through the integration or the Week Planner settings dialog. Global settings require an administrator. The Lovelace card type is custom:week-planner-card; its editor exposes presentation settings only.
 
-## Manual installation (0.4.2)
+After a frontend update, refresh the browser. Verify the integration and frontend versions when testing manual builds.
 
-1. Open your Home Assistant configuration directory.
-2. Copy the folder:
+## Development
 
-   `custom_components/week_planner`
+See [DEVELOPMENT.md](DEVELOPMENT.md) for branch/release workflow and [shared data architecture](docs/shared-data-architecture.md) for cache ownership, configuration propagation, lifecycle and test commands.
 
-   into:
+The automated regression suite covers shared stores, request races, configuration changes and backend boundaries. Real Home Assistant testing, HACS validation and Hassfest are still required before release.
 
-   `/config/custom_components/week_planner`
+## Historical changelog
 
-3. Restart Home Assistant.
-4. Go to **Settings → Devices & services → Add integration**.
-5. Search for **Week Planner**.
-6. Select:
-   - one `weather.*` entity
-   - one or more `calendar.*` entities
-7. Finish setup.
-8. A **Week Planner** item should appear in the Home Assistant sidebar.
-
-If the panel does not appear immediately, hard-refresh the browser because Home Assistant aggressively caches frontend resources.
-
-## HACS goal
-
-The repository is already structured as a HACS custom-integration repository:
-
-- `custom_components/week_planner/`
-- `hacs.json`
-- versioned `manifest.json`
-- README
-- GitHub workflow placeholder
-
-For development, you can add the GitHub repository as a **Custom repository** in HACS using category **Integration**. Once the project is mature, it can be submitted to HACS' default repository list.
-
-## Data sources
-
-Week Planner does not connect directly to Google Calendar or weather providers.
-
-Instead, it consumes Home Assistant entities:
-
-- `calendar.*`
-- `weather.*`
-
-That means Google Calendar, CalDAV, Local Calendar, Met.no and other providers can be used as long as they already expose entities in Home Assistant.
-
-## Development status
-
-This is an early prototype. Back up your Home Assistant configuration before testing custom integrations.
+Older version sections below describe previous implementation stages. Current behavior follows the code and architecture document above.
 
 ## 0.1.1 fix
 

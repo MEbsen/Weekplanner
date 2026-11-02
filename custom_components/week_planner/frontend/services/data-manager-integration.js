@@ -1,75 +1,61 @@
-import { WeekPlannerDataManager } from "./data-manager.js";
-import { ensureDailyWeather } from "./weather-data.js";
+import { sharedStore } from "./shared-store.js";
 
 const panel = customElements.get("week-planner-panel");
-if (!panel) {
-  console.warn("Week Planner DataManager integration: panel element unavailable");
-} else {
-  const proto = panel.prototype;
+if (!panel) throw new Error("Week Planner data integration requires panel definition");
+const proto = panel.prototype;
 
-  function manager(instance) {
-    if (!instance.__weekPlannerDataManager) {
-      instance.__weekPlannerDataManager = new WeekPlannerDataManager({
-        getHass: () => instance._hass,
-        getConfig: () => instance._config,
-        getWeekStart: () => instance._weekStart,
-        getDayCount: () => instance._dayCount(),
-        addDays: (date, amount) => instance._addDays(date, amount),
-        isoLocal: (date) => instance._isoLocal(date),
-        stableJson: (value) => instance._stableJson(value),
-        weatherVisible: () => instance._weatherVisibleNow(),
-        energyCompatibility: () => instance._energyCompatibility(),
-        sourceHealth: {
-          markAttempt: (key, label) => instance._markSourceAttempt(key, label),
-          markSuccess: (key, label) => instance._markSourceSuccess(key, label),
-          markFailure: (key, label, error) => instance._markSourceFailure(key, label, error),
-        },
-      });
-    }
-    return instance.__weekPlannerDataManager;
+proto._sharedStore = function() {
+  const store = sharedStore(this._hass);
+  if (this.__sharedStore && this.__sharedStore !== store) this.__sharedStore.detach(this);
+  this.__sharedStore = store;
+  if (this.isConnected) store.attach(this);
+  return store;
+};
+
+proto._getSharedConfig = async function(force = false) {
+  const store = this._sharedStore();
+  await store.getConfig(force);
+  return store.config;
+};
+
+proto._applySharedConfig = function(config) {
+  return this._sharedStore().applyConfig(config);
+};
+
+proto._dataManager = function() {
+  return this._sharedStore().manager(this);
+};
+
+proto._dataSnapshot = function() { return this._dataManager().snapshot(); };
+
+proto._loadDataManaged = async function() {
+  const manager = this._dataManager();
+  const before = this._healthRenderSignature();
+  const result = await manager.loadAll();
+  if (!this.isConnected || this._dataManager() !== manager) return { obsolete:true };
+  if (result.changed || before !== this._healthRenderSignature()) {
+    this._sharedStore().notify(manager, result, this);
   }
+  return result;
+};
 
-  proto._dataManager = function() {
-    return manager(this);
-  };
+proto._refreshCalendarEventsManaged = async function() {
+  const manager = this._dataManager();
+  const result = await manager.fetchCalendars();
+  if (!this.isConnected || this._dataManager() !== manager) return { obsolete:true };
+  return result;
+};
 
-  proto._dataSnapshot = function() {
-    return manager(this).snapshot();
-  };
+proto._setupCalendarSubscriptions = function() {
+  return this._sharedStore().subscribe(this);
+};
 
-  proto._loadDataManaged = async function() {
-    const dataManager = manager(this);
-    const result = await dataManager.loadAll();
-    const mode = this._config?.weather_display || "both";
+proto._clearCalendarSubscriptions = function() {
+  this.__sharedStore?.releaseUnusedRanges();
+};
 
-    if (this._weatherVisibleNow() && (mode === "daily" || mode === "both")) {
-      // Some HA weather providers expose hourly forecasts but reject/omit daily.
-      // Fetch hourly only as a data fallback when no daily payload arrived.
-      if (!(dataManager.dailyWeather || []).length && !(dataManager.hourlyWeather || []).length) {
-        try {
-          dataManager.hourlyWeather = await dataManager.fetchForecast("hourly");
-        } catch (_error) {
-          // Keep the original weather health/error from loadAll; there is no
-          // additional useful state to report if the fallback also fails.
-        }
-      }
-
-      const recovered = ensureDailyWeather(dataManager);
-      if ((dataManager.dailyWeather || []).length) {
-        // A valid native or derived daily dataset means Week Planner can serve
-        // the configured daily view even when the provider lacks native daily.
-        this._markSourceSuccess("weather", "Vejr");
-        result.warnings = (result.warnings || []).filter(
-          (warning) => !String(warning).startsWith("Dagsvejr kunne ikke hentes:")
-        );
-      }
-      result.changed = recovered || result.changed;
-      result.snapshot = dataManager.snapshot();
-    }
-    return result;
-  };
-
-  proto._refreshCalendarEventsManaged = async function() {
-    return manager(this).fetchCalendars();
-  };
-}
+const disconnect = proto.disconnectedCallback;
+proto.disconnectedCallback = function() {
+  this.__sharedStore?.detach(this);
+  return disconnect.call(this);
+};

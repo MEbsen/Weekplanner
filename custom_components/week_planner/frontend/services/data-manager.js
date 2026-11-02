@@ -1,3 +1,5 @@
+import { normalizeDailyForecast, dailyForecastFromHourly } from "./weather-data.js";
+
 // Shared data loading/orchestration for Week Planner.
 //
 // DataManager owns retrieval and last-known-good state for external data
@@ -34,6 +36,10 @@ export class WeekPlannerDataManager {
     this.daylightExtrema = {};
     this.moonTransitions = [];
     this.historyData = {};
+    this._calendarGeneration = 0;
+    this._calendarPending = null;
+    this._allPending = null;
+    this._lastLoad = 0;
   }
 
   snapshot() {
@@ -58,7 +64,21 @@ export class WeekPlannerDataManager {
     return { start, end };
   }
 
-  async fetchCalendars() {
+  invalidateCalendar() {
+    this._calendarGeneration++;
+  }
+
+  fetchCalendars() {
+    if (this._calendarPending) return this._calendarPending;
+    const pending = this._fetchCalendars().finally(() => {
+      if (this._calendarPending === pending) this._calendarPending = null;
+    });
+    this._calendarPending = pending;
+    return pending;
+  }
+
+  async _fetchCalendars() {
+    const generation = this._calendarGeneration;
     const hass = this.getHass();
     const config = this.getConfig();
     const calendars = config?.calendar_entities || [];
@@ -82,12 +102,15 @@ export class WeekPlannerDataManager {
         target: { entity_id: calendars },
         return_response: true,
       });
-      const next = result?.response || {};
+      if (generation !== this._calendarGeneration) return { changed:false, ok:true };
+      const next = result?.response;
+      if (!next || typeof next !== "object") throw new Error("Ugyldigt kalendersvar");
       const changed = this.changed(this.events || {}, next);
       this.events = next;
       this.sourceHealth.markSuccess("calendar", "Kalendere");
       return { changed, ok: true };
     } catch (error) {
+      if (generation !== this._calendarGeneration) return { changed:false, ok:true };
       this.sourceHealth.markFailure("calendar", "Kalendere", error);
       return { changed: false, ok: false, error };
     }
@@ -105,37 +128,64 @@ export class WeekPlannerDataManager {
       target: { entity_id: weatherEntity },
       return_response: true,
     });
-    return result?.response?.[weatherEntity]?.forecast || [];
+    const forecast = result?.response?.[weatherEntity]?.forecast;
+    if (!Array.isArray(forecast)) throw new Error("Ugyldigt vejrsvar");
+    return forecast;
   }
 
   async loadWeather(warnings) {
     const config = this.getConfig();
-    const mode = this.weatherVisible()
-      ? (config?.weather_display || "both")
-      : "none";
-    let changed = false;
-
-    const load = async (type, field, label) => {
-      if (mode !== type && mode !== "both") {
-        if ((this[field] || []).length) changed = true;
-        this[field] = [];
-        return;
-      }
+    const mode = config?.weather_entity ? (config.weather_display || "none") : "none";
+    const before = this.stableJson([this.hourlyWeather, this.dailyWeather]);
+    if (mode === "none") {
+      this.hourlyWeather = [];
+      this.dailyWeather = [];
+      return before !== this.stableJson([[], []]);
+    }
+    const failures = [];
+    let freshHourly = false;
+    let freshDaily = false;
+    const load = async type => {
+      const key = `weather_${type}`;
+      const label = type === "hourly" ? "Timevejr" : "Dagsvejr";
+      this.sourceHealth.markAttempt(key, label);
       try {
-        this.sourceHealth.markAttempt("weather", "Vejr");
         const next = await this.fetchForecast(type);
-        if (this.changed(this[field] || [], next || [])) changed = true;
-        this[field] = next || [];
-        this.sourceHealth.markSuccess("weather", "Vejr");
+        if (!Array.isArray(next) || !next.length) throw new Error("Ingen prognosedata");
+        this[type === "hourly" ? "hourlyWeather" : "dailyWeather"] =
+          type === "daily" ? normalizeDailyForecast(next) : next;
+        this.sourceHealth.markSuccess(key, label);
+        return true;
       } catch (error) {
-        this.sourceHealth.markFailure("weather", "Vejr", error);
-        warnings.push(`${label} kunne ikke hentes: ${error?.message || error}`);
+        this.sourceHealth.markFailure(key, label, error);
+        failures.push({ type, label, error });
+        return false;
       }
     };
-
-    await load("hourly", "hourlyWeather", "Timevejr");
-    await load("daily", "dailyWeather", "Dagsvejr");
-    return changed;
+    this.sourceHealth.markAttempt("weather", "Vejr");
+    if (mode === "hourly" || mode === "both") freshHourly = await load("hourly");
+    if (mode === "daily" || mode === "both") {
+      freshDaily = await load("daily");
+      if (!freshDaily) {
+        if (mode === "daily") freshHourly = await load("hourly");
+        if (freshHourly) {
+          const derived = dailyForecastFromHourly(this.hourlyWeather);
+          if (derived.length) {
+            this.dailyWeather = derived;
+            freshDaily = true;
+          }
+        }
+      }
+    }
+    const failed = failures.filter(item =>
+      item.type === "daily" ? !freshDaily : (mode !== "daily" || !freshDaily));
+    if (failed.length) {
+      this.sourceHealth.markFailure("weather", "Vejr", failed.map(item => item.error?.message || item.error).join("; "));
+      for (const item of failed) warnings.push(`${item.label} kunne ikke hentes: ${item.error?.message || item.error}`);
+    } else {
+      this.sourceHealth.markSuccess("weather", "Vejr");
+    }
+    return before !== this.stableJson([this.hourlyWeather, this.dailyWeather]);
   }
 
   async loadSun(warnings) {
@@ -264,7 +314,22 @@ export class WeekPlannerDataManager {
     }
   }
 
-  async loadAll() {
+  loadAll() {
+    if (this._allPending) return this._allPending;
+    if (this._lastResult && Date.now() - this._lastLoad < 290000) {
+      return Promise.resolve({ ...this._lastResult, changed:false, snapshot:this.snapshot() });
+    }
+    const pending = this._loadAll().then(result => {
+      this._lastResult = result;
+      // Failed sources must be retryable on focus rather than cached as success.
+      if (!result.error && !result.warnings.length) this._lastLoad = Date.now();
+      return result;
+    }).finally(() => { if (this._allPending === pending) this._allPending = null; });
+    this._allPending = pending;
+    return pending;
+  }
+
+  async _loadAll() {
     const warnings = [];
     let error = "";
     let changed = false;
@@ -275,9 +340,10 @@ export class WeekPlannerDataManager {
       error = `Kalenderdata kunne ikke hentes: ${calendars.error?.message || calendars.error}`;
     }
 
-    changed ||= await this.loadWeather(warnings);
-    changed ||= await this.loadSun(warnings);
-    changed ||= await this.loadMoon(warnings);
+    const weatherChanged = await this.loadWeather(warnings);
+    const sunChanged = await this.loadSun(warnings);
+    const moonChanged = await this.loadMoon(warnings);
+    changed = changed || weatherChanged || sunChanged || moonChanged;
     const history = await this.loadHistory(warnings);
     changed ||= history.changed;
     this.checkEnergy();

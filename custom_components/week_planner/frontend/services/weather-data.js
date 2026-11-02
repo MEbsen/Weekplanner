@@ -33,7 +33,8 @@ export function dailyForecastFromHourly(items = []) {
   const result = [];
   for (const [key, day] of groups) {
     if (!day.length) continue;
-    const temperatures = day.map((item) => Number(item.temperature)).filter(Number.isFinite);
+    const temperatures = day.filter(item => item.temperature != null && String(item.temperature).trim() !== "")
+      .map(item => Number(item.temperature)).filter(Number.isFinite);
     const representative = day.find((item) => {
       const hour = new Date(item.datetime).getHours();
       return hour >= 11 && hour <= 14;
@@ -48,18 +49,4 @@ export function dailyForecastFromHourly(items = []) {
     });
   }
   return result;
-}
-
-export function ensureDailyWeather(manager) {
-  const normalized = normalizeDailyForecast(manager.dailyWeather);
-  if (normalized.length) {
-    manager.dailyWeather = normalized;
-    return false;
-  }
-
-  const fallback = dailyForecastFromHourly(manager.hourlyWeather);
-  if (!fallback.length) return false;
-  const changed = manager.changed(manager.dailyWeather || [], fallback);
-  manager.dailyWeather = fallback;
-  return changed;
 }
