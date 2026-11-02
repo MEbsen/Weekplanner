@@ -1,12 +1,12 @@
 # Shared configuration and data
-Implementation version: 0.5.3-dev.31 (development prerelease).
+Implementation version: 0.5.3-dev.32 (development prerelease).
 
 ## Ownership
 A WeakMap keyed by the authenticated Home Assistant connection owns one WeekPlannerStore per browser JavaScript realm. Panel, managed dashboard and Lovelace cards obtain that store through sharedStore(hass). A different connection gets a different store.
 
 The store owns authoritative integration configuration, request deduplication, bounded transport cache, date-range data managers, calendar subscriptions and one network polling timer. There is no card-specific provider configuration.
 
-Each view owns its date selection, day count, layout, height, local layer masks, dialogs and scroll controller. Hiding weather never clears shared weather data. Changing card height or colors does not invalidate source caches.
+Each view owns its date selection, day count, layout, height, local layer masks, dialogs and scroll controller. Scroll mode and fixed hour come exclusively from shared integration configuration. Hiding weather never clears shared weather data. Changing card height or colors does not invalidate source caches.
 
 ## Date ranges and cache
 Views displaying the same start date and day count share the very same manager and raw data objects. Different ranges get isolated calendar/history/sun/moon snapshots so navigation cannot overwrite another view. Requests for range-independent forecasts are shared across ranges.
@@ -34,12 +34,13 @@ Global configuration writes require Home Assistant administrator access. Nested 
 
 ## Validation
 
-### Fullscreen cards and native panels (dev.31)
+### Shared scroll configuration (dev.32)
 A regular custom:week-planner-card remains a card when used in a Lovelace panel
-view or stretched to fullscreen. Its card editor controls local scroll_mode and
-default_scroll_hour. The central integration's Follow NOW setting applies to the
-native custom:week-planner-dashboard-card host. Shared configuration/data do not
-override explicit local presentation settings.
+view or stretched to fullscreen. Both card and native dashboard host take
+scroll_mode and default_scroll_hour from the shared integration configuration.
+Legacy local YAML values are ignored and omitted from card editor output. The
+editor retains the required custom card type when emitting configuration changes.
+Height, day count, toolbar and local layer masks remain presentation settings.
 
 The automatic native dashboard type migration introduced in dev.30 was based on
 an incorrect assumption about a fullscreen card and is removed in dev.31.

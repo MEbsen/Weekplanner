@@ -81,19 +81,49 @@ try{
   await page.evaluate(()=>views[1]._render(false));
   await page.waitForFunction(expected=>Math.abs(views[1].shadowRoot.getElementById("scroll").scrollTop-expected)<2,manual);
   console.log("PASS real wheel input survives DOM replacement at",manual);
-  // A fullscreen regular card intentionally retains local fixed 06:00 mode
-  // even when the native panel's central setting is Follow NOW.
+  // Legacy local scroll values must no longer override shared configuration.
   await page.evaluate(()=>{
-    const legacy=document.createElement("week-planner-card");
-    legacy.setConfig({height:979});
-    legacy.hass=views[0]._hass;
-    document.getElementById("host").replaceChildren(legacy);
-    window.legacyPanel=legacy;
+    const card=document.createElement("week-planner-card");
+    card.setConfig({height:979,scroll_mode:"fixed",default_scroll_hour:6});
+    card.hass=views[0]._hass;
+    document.getElementById("host").replaceChildren(card);
+    window.fullscreenCard=card;
   });
-  await page.waitForFunction(()=>legacyPanel._config?.scroll_mode==="follow_now"
-    &&legacyPanel._effectiveScrollMode()==="fixed"
-    &&legacyPanel.shadowRoot.getElementById("scroll")?.scrollTop===448);
-  console.log("PASS fullscreen card preserves its local fixed mode independently of native panel Follow NOW");
+  await page.waitForFunction(()=>{
+    const scroll=fullscreenCard.shadowRoot.getElementById("scroll");
+    return fullscreenCard._effectiveScrollMode()==="follow_now"
+      && scroll?.scrollTop===scroll?.scrollHeight-scroll?.clientHeight;
+  });
+  console.log("PASS fullscreen card ignores legacy local fixed mode and uses shared Follow NOW");
+  await page.evaluate(()=>fullscreenCard._applySharedConfig({
+    ...fullscreenCard._config,scroll_mode:"fixed",default_scroll_hour:13,
+  }));
+  await page.waitForFunction(()=>fullscreenCard.shadowRoot.getElementById("scroll")?.scrollTop===980);
+  await page.evaluate(()=>fullscreenCard._applySharedConfig({
+    ...fullscreenCard._config,scroll_mode:"follow_now",
+  }));
+  await page.waitForFunction(()=>{
+    const scroll=fullscreenCard.shadowRoot.getElementById("scroll");
+    return scroll.scrollTop===scroll.scrollHeight-scroll.clientHeight;
+  });
+  console.log("PASS shared scroll changes immediately reposition fullscreen card");
+  const editorResult=await page.evaluate(()=>{
+    const editor=document.createElement("week-planner-card-editor");
+    document.body.append(editor);
+    editor.setConfig({type:"custom:week-planner-card",height:979,scroll_mode:"fixed",default_scroll_hour:6});
+    let emitted;
+    editor.addEventListener("config-changed",event=>{emitted=event.detail.config;});
+    const height=editor.shadowRoot.getElementById("height");
+    height.value="800";height.dispatchEvent(new Event("change",{bubbles:true}));
+    const result={config:emitted,hasScroll:!!editor.shadowRoot.getElementById("scrollMode")};
+    editor.remove();return result;
+  });
+  assert.equal(editorResult.config.type,"custom:week-planner-card");
+  assert.equal(editorResult.config.height,800);
+  assert.equal(editorResult.hasScroll,false);
+  assert.equal("scroll_mode" in editorResult.config,false);
+  assert.equal("default_scroll_hour" in editorResult.config,false);
+  console.log("PASS card editor emits valid typed configuration without obsolete scroll fields");
   // HA can assign hass and resolve the shared cache before connecting a view.
   // Exercise native panel mounting independently of the working regular card.
   await page.evaluate(async()=>{

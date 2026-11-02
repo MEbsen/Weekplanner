@@ -210,16 +210,10 @@ class WeekPlannerPanel extends HTMLElement {
   }
 
   _effectiveScrollMode() {
-    if (this._isDashboardCard) {
-      return this._cardConfig?.scroll_mode || "fixed";
-    }
     return this._config?.scroll_mode || "fixed";
   }
 
   _effectiveScrollHour() {
-    if (this._isDashboardCard) {
-      return Number(this._cardConfig?.default_scroll_hour ?? 6);
-    }
     return Number(this._config?.default_scroll_hour ?? 6);
   }
 
@@ -2734,8 +2728,6 @@ class WeekPlannerCard extends WeekPlannerPanel {
       hide_sun: false,
       hide_energy: false,
       days_to_show: 7,
-      default_scroll_hour: 6,
-      scroll_mode: "fixed",
     };
   }
 
@@ -2751,8 +2743,6 @@ class WeekPlannerCard extends WeekPlannerPanel {
       hide_sun: false,
       hide_energy: false,
       days_to_show: 7,
-      default_scroll_hour: 6,
-      scroll_mode: "fixed",
     };
   }
 
@@ -2770,12 +2760,6 @@ class WeekPlannerCard extends WeekPlannerPanel {
       days_to_show: Number.isFinite(Number(incoming.days_to_show))
         ? Math.min(14, Math.max(1, Math.round(Number(incoming.days_to_show))))
         : 7,
-      default_scroll_hour: Number.isFinite(Number(incoming.default_scroll_hour))
-        ? Math.min(23, Math.max(0, Number(incoming.default_scroll_hour)))
-        : 6,
-      scroll_mode: ["none", "fixed", "follow_now"].includes(incoming.scroll_mode)
-        ? incoming.scroll_mode
-        : "fixed",
     };
 
     // Lovelace may call setConfig repeatedly with the same effective
@@ -2783,8 +2767,6 @@ class WeekPlannerCard extends WeekPlannerPanel {
     // scroll state prevents ordinary HA updates from jumping the card to top.
     const previousScrollSignature = this._lastCardScrollSignature || null;
     const nextScrollSignature = JSON.stringify({
-      scroll_mode: this._cardConfig.scroll_mode,
-      default_scroll_hour: this._cardConfig.default_scroll_hour,
       days_to_show: this._cardConfig.days_to_show,
       height: this._cardConfig.height,
     });
@@ -2874,8 +2856,6 @@ class WeekPlannerCardEditor extends HTMLElement {
       hide_sun: false,
       hide_energy: false,
       days_to_show: 7,
-      default_scroll_hour: 6,
-      scroll_mode: "fixed",
     };
   }
 
@@ -2910,14 +2890,14 @@ if (!customElements.get("week-planner-card")) {
   customElements.define("week-planner-card", WeekPlannerCard);
 }
 
-window.weekPlannerFrontendVersion = "0.5.3-dev.31";
+window.weekPlannerFrontendVersion = "0.5.3-dev.32";
 window.customCards = window.customCards || [];
 
 if (!window.customCards.some((card) => card.type === "week-planner-card")) {
   window.customCards.push({
     type: "week-planner-card",
     name: "Week Planner Card",
-    description: "Week Planner dashboard card · frontend v0.5.3-dev.31",
+    description: "Week Planner dashboard card · frontend v0.5.3-dev.32",
     preview: false,
   });
 }
