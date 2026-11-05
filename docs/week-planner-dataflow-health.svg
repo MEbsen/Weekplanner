@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="900" viewBox="0 0 1400 900">
+<style>
+text{font-family:Arial,sans-serif;fill:#152238}.title{font-size:36px;font-weight:700}.sub{font-size:19px;fill:#5d6b7c}.h{font-size:22px;font-weight:700}.t{font-size:16px}.small{font-size:14px}.box{stroke:#9aa9ba;stroke-width:1.5;rx:14}.arrow{stroke:#60758a;stroke-width:2.5;fill:none;marker-end:url(#a)}
+</style>
+<defs><marker id="a" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#60758a"/></marker></defs>
+<rect width="1400" height="900" fill="#fff"/>
+<text x="700" y="55" text-anchor="middle" class="title">Week Planner – Dataflow og Health-lag</text>
+<text x="700" y="85" text-anchor="middle" class="sub">0.5.3-dev.11: last-known-good, recovery og health-status pr. datakilde</text>
+
+<rect x="35" y="125" width="245" height="560" fill="#eef7ff" class="box"/><text x="157" y="165" text-anchor="middle" class="h">Triggers / lifecycle</text>
+<text x="60" y="210" class="t">• Initial load</text><text x="60" y="250" class="t">• Kalenderpoll hvert minut</text><text x="60" y="290" class="t">• Datarefresh hvert 5. minut</text><text x="60" y="330" class="t">• Døgnskifte</text><text x="60" y="370" class="t">• Fokus / visibility</text><text x="60" y="410" class="t">• Lovelace remount</text><text x="60" y="450" class="t">• HA / WebSocket reconnect</text>
+<text x="60" y="510" class="small">Minutpoll må hente data, men</text><text x="60" y="532" class="small">renderer kun ved reel ændring.</text>
+
+<rect x="330" y="125" width="275" height="560" fill="#f3f0ff" class="box"/><text x="468" y="165" text-anchor="middle" class="h">Week Planner runtime</text>
+<text x="355" y="215" class="t">Initialization + retry</text><text x="355" y="255" class="t">Refresh orchestrator</text><text x="355" y="295" class="t">Calendar subscriptions</text><text x="355" y="335" class="t">Day rollover</text><text x="355" y="375" class="t">Runtime recovery</text><text x="355" y="415" class="t">Change detection</text><text x="355" y="455" class="t">Scroll / UI state</text>
+<rect x="355" y="515" width="225" height="115" fill="#fff" class="box"/><text x="468" y="548" text-anchor="middle" class="h">Last-known-good</text><text x="375" y="580" class="small">Fejl må ikke overskrive</text><text x="375" y="602" class="small">gyldige data med tom state.</text>
+
+<rect x="655" y="125" width="245" height="560" fill="#fff8e8" class="box"/><text x="778" y="165" text-anchor="middle" class="h">Datakilder</text>
+<text x="680" y="215" class="t">📅 Kalendere</text><text x="680" y="260" class="t">☁ Vejr</text><text x="680" y="305" class="t">☀ Sol / dagslængde</text><text x="680" y="350" class="t">☾ Månefaser</text><text x="680" y="395" class="t">▥ Historik</text><text x="680" y="440" class="t">⚡ Elpriser</text><text x="680" y="485" class="t">⌂ HA runtime</text>
+<text x="680" y="545" class="small">Kilder aktiveres ud fra</text><text x="680" y="567" class="small">panel/card-konfiguration.</text>
+
+<rect x="950" y="125" width="300" height="560" fill="#eef9ee" class="box"/><text x="1100" y="165" text-anchor="middle" class="h">Source Health</text>
+<text x="980" y="215" class="t">UNKNOWN → endnu ikke testet</text><text x="980" y="255" class="t">FRESH → seneste kald lykkedes</text><text x="980" y="295" class="t">STALE → fejl, LKG vises</text><text x="980" y="335" class="t">ERROR → ingen brugbare data</text>
+<text x="980" y="395" class="t">Metadata pr. kilde:</text><text x="1000" y="430" class="small">last_success</text><text x="1000" y="455" class="small">last_attempt</text><text x="1000" y="480" class="small">last_error</text>
+<rect x="980" y="535" width="240" height="105" fill="#fff" class="box"/><text x="1100" y="568" text-anchor="middle" class="h">Health ribbon</text><text x="1000" y="598" class="small">⚠ Ikoner til venstre for</text><text x="1000" y="620" class="small">Konfigurer + hover-detaljer</text>
+
+<path d="M280 400 H330" class="arrow"/><path d="M605 400 H655" class="arrow"/><path d="M900 400 H950" class="arrow"/>
+<path d="M1100 685 V750 H760" class="arrow"/><path d="M468 685 V750 H640" class="arrow"/>
+
+<rect x="360" y="750" width="680" height="110" fill="#f7f8fa" class="box"/><text x="700" y="785" text-anchor="middle" class="h">UI state / Lovelace panel + card</text>
+<text x="390" y="820" class="t">Render kun ved reel data-/health-ændring • behold last-known-good • vis health uden at forstyrre kalenderen</text>
+<text x="390" y="847" class="small">Samme runtime- og health-principper gælder både panel og card.</text>
+</svg>

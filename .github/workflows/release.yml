@@ -49,4 +49,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
-        run: gh release create "$TAG" --target "$GITHUB_SHA" --title "Week Planner $TAG" --generate-notes
+        run: gh release create "$TAG" --target "$GITHUB_SHA" --title "Week Planner $TAG" --notes-file "RELEASE_NOTES_${TAG#v}.md" --latest
