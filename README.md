@@ -2,7 +2,7 @@
 
 Week Planner displays calendars, weather, sun/moon, energy prices and entity history in a native dashboard or Lovelace card.
 
-Current development version: **0.5.3-dev.32**. Use the prerelease version in HACS for testing.
+Current stable version: **0.5.3**. Update through HACS, restart Home Assistant and refresh your browser.
 
 Panel and cards share integration configuration, data cache, identical requests and calendar subscriptions through one store per Home Assistant connection. Each view independently controls its date range, layout, visible layers, height and scroll. Separate tabs/devices have separate runtime caches.
 
@@ -751,3 +751,10 @@ Removing the Week Planner integration removes its managed dashboard/resource.
 ![Week Planner dataflow and health architecture](docs/week-planner-dataflow-health.svg)
 
 The diagram documents the runtime triggers, configured data sources, last-known-good behavior, source-health states, and the shared panel/card UI flow introduced during the 0.5.3-dev.11 stability work.
+## Automated releases
+
+Releases are created by GitHub Actions. Complete and validate all changes first,
+then update `version` in `custom_components/week_planner/manifest.json`. The
+final version commit must use the exact message `Release vX.Y.Z`. The workflow
+checks the manifest, Python syntax and HACS compliance before creating a new tag
+and GitHub Release. Existing tags are never overwritten.

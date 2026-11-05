@@ -1,5 +1,5 @@
 # Shared configuration and data
-Implementation version: 0.5.3-dev.32 (development prerelease).
+Implementation version: 0.5.3 (stable; promoted from the user-tested dev.32).
 
 ## Ownership
 A WeakMap keyed by the authenticated Home Assistant connection owns one WeekPlannerStore per browser JavaScript realm. Panel, managed dashboard and Lovelace cards obtain that store through sharedStore(hass). A different connection gets a different store.

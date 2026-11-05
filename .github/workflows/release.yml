@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: startsWith(github.event.head_commit.message, 'Release v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read and verify version
+        id: version
+        shell: bash
+        run: |
+          version="$(python -c 'import json; print(json.load(open("custom_components/week_planner/manifest.json"))["version"])')"
+          tag="v${version}"
+          if [ "${{ github.event.head_commit.message }}" != "Release ${tag}" ]; then
+            echo "Commit message must be exactly: Release ${tag}" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "Tag ${tag} already exists; refusing to overwrite it." >&2
+            exit 1
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Validate Python and JSON
+        shell: bash
+        run: |
+          python -m compileall -q custom_components/week_planner
+          python -m json.tool custom_components/week_planner/manifest.json >/dev/null
+          python -m json.tool hacs.json >/dev/null
+
+      - name: Validate HACS repository
+        uses: hacs/action@main
+        with:
+          category: integration
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: gh release create "$TAG" --target "$GITHUB_SHA" --title "Week Planner $TAG" --generate-notes
